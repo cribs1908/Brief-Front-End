@@ -182,8 +182,8 @@ export const generateReport = action({
     const client = await ctx.runQuery(api.clients.listClients).then((cs: any[]) => cs.find((c: any) => c._id === args.clientId));
     if (!client || client.userTokenIdentifier !== identity.subject) throw new Error("Cliente non trovato");
 
-    const customerId = client.googleAdsCustomerId;
-    const isTest = !!args.useMock || customerId === "TEST";
+    const customerId = client.googleAdsCustomerId || (client._id === ("TEST_PLACEHOLDER" as any) ? "TEST" : undefined);
+    const isTest = !!args.useMock || customerId === "TEST" || client._id === ("TEST_PLACEHOLDER" as any);
     if (!customerId) throw new Error("Cliente senza Google Ads customerId");
 
     // current period

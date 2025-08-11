@@ -14,6 +14,7 @@ import { toast } from "sonner";
 export default function CreateReportPage() {
   const clients = useQuery(api.clients.listClients) || [];
   const [client, setClient] = useState<string>("");
+  const TEST_CLIENT_VALUE = "__CLIENTE_TEST__";
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
   const [language, setLanguage] = useState("it");
@@ -42,11 +43,26 @@ export default function CreateReportPage() {
             <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-4">
               <div className="flex flex-col gap-2">
                 <Label>Cliente</Label>
-                <Select value={client} onValueChange={setClient}>
+                <Select
+                  value={client}
+                  onValueChange={async (val) => {
+                    if (val === TEST_CLIENT_VALUE) {
+                      try {
+                        const test = await ensureTestClient({} as any);
+                        setClient(test._id);
+                      } catch {
+                        toast.error("Errore creazione cliente di test");
+                      }
+                      return;
+                    }
+                    setClient(val);
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Seleziona cliente" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={TEST_CLIENT_VALUE}>Cliente di test (mock)</SelectItem>
                     {clients.map((c) => (
                       <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
                     ))}
