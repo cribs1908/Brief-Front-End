@@ -135,6 +135,8 @@ export const generateReport = action({
     language: v.string(),
     tone: v.string(),
     signature: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    model: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<any> => {
     const identity = await ctx.auth.getUserIdentity();
@@ -170,30 +172,95 @@ export const generateReport = action({
     ]);
 
     const diff = computeDiff(current, previous);
-    const insights = pickInsights(diff);
 
-    // AI intro
+    // Prompt strutturato per generare soggetto, intro, win/riski/azioni
     const preamble = await buildAIPreamble({ language: args.language, tone: args.tone });
-    let intro = `${preamble} Di seguito i principali risultati del periodo ${start} – ${end}.`;
+    let generatedSubject: string | null = null;
+    let generatedIntro: string | null = null;
+    let generatedWins: string[] | null = null;
+    let generatedRisks: string[] | null = null;
+    let generatedActions: string[] | null = null;
+
+    const promptPayload = {
+      client: { name: client.name },
+      period: { start, end },
+      language: args.language,
+      tone: args.tone,
+      notes: args.notes || "",
+      metrics: { current, previous, diff },
+      requirements: {
+        subject: true,
+        intro: { sentences: "2-3" },
+        wins: 5,
+        risks: 5,
+        actions: 3,
+      },
+      output_format: {
+        type: "json",
+        schema: {
+          subject: "string",
+          intro: "string",
+          wins: ["string"],
+          risks: ["string"],
+          actions: ["string"],
+        },
+      },
+    };
+
     try {
       if (process.env.OPENAI_API_KEY) {
         const { text } = await generateText({
-          model: openai("gpt-4o-mini"),
-          prompt: `${preamble} Genera una breve introduzione (2-3 frasi) per un'email di update Google Ads per il cliente ${client.name}, periodo ${start} – ${end}. Non includere saluti né firma.`,
+          model: openai(args.model || "gpt-4o-mini"),
+          prompt:
+            `${preamble}\n` +
+            `Sei un assistente che scrive email di update per Google Ads basandoti su dati strutturati. ` +
+            `Usa i dati forniti per identificare 5 "Win" (risultati positivi, con riferimenti a campagne e KPI), ` +
+            `5 "Rischi" (criticità e cali, con riferimenti a campagne e KPI), ` +
+            `e 3 "Azioni" (raccomandazioni operative concrete). ` +
+            `Mantieni il linguaggio semplice per non addetti ai lavori. ` +
+            `Rispetta eventuali note del consulente se presenti. ` +
+            `Restituisci esclusivamente un JSON valido che rispetti esattamente lo schema richiesto, senza testo aggiuntivo o code fences.\n\n` +
+            `Dati di contesto (JSON):\n` +
+            `${JSON.stringify(promptPayload)}`,
+          temperature: 0.2,
         });
-        if (text) intro = text;
+        if (text) {
+          const cleaned = text
+            .trim()
+            .replace(/^```json\n?|^```\n?|```$/g, "");
+          try {
+            const obj = JSON.parse(cleaned);
+            generatedSubject = typeof obj.subject === "string" ? obj.subject : null;
+            generatedIntro = typeof obj.intro === "string" ? obj.intro : null;
+            generatedWins = Array.isArray(obj.wins) ? obj.wins.slice(0, 5) : null;
+            generatedRisks = Array.isArray(obj.risks) ? obj.risks.slice(0, 5) : null;
+            generatedActions = Array.isArray(obj.actions) ? obj.actions.slice(0, 3) : null;
+          } catch (e) {
+            console.warn("AI JSON parse error", e);
+          }
+        }
       }
     } catch (e) {
-      console.warn("AI intro fallback:", e);
+      console.warn("AI generation fallback:", e);
     }
+
+    // Fallback a euristiche locali se necessario
+    const fallbackInsights = pickInsights(diff);
+    const subjectForEmail =
+      generatedSubject || `Aggiornamento performance Google Ads – ${client.name} (${start} – ${end})`;
+    const introForEmail =
+      generatedIntro || `${preamble} Di seguito i principali risultati del periodo ${start} – ${end}.`;
+    const winsForEmail = generatedWins || fallbackInsights.wins;
+    const risksForEmail = generatedRisks || fallbackInsights.risks;
+    const actionsForEmail = generatedActions || fallbackInsights.actions;
 
     const { subject, html, text } = buildEmail({
       clientName: client.name,
       periodLabel: `${start} – ${end}`,
-      intro,
-      wins: insights.wins,
-      risks: insights.risks,
-      actions: insights.actions,
+      intro: introForEmail,
+      wins: winsForEmail,
+      risks: risksForEmail,
+      actions: actionsForEmail,
       signature: args.signature || client.preferences?.signature || "",
     });
 

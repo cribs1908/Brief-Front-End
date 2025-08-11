@@ -18,6 +18,7 @@ export default function CreateReportPage() {
   const [language, setLanguage] = useState("it");
   const [tone, setTone] = useState("amichevole");
   const [signature, setSignature] = useState("Team Agenzia\nFirma standard");
+  const [model, setModel] = useState("gpt-4o-mini");
   const [notes, setNotes] = useState("");
   const generate = useAction(api.reports.generateReport);
   const createDraft = useAction(api.reports.createGmailDraft);
@@ -89,6 +90,20 @@ export default function CreateReportPage() {
                     <SelectItem value="formale">Formale</SelectItem>
                     <SelectItem value="amichevole">Amichevole</SelectItem>
                     <SelectItem value="diretto">Diretto</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label>Modello AI</Label>
+                <Select value={model} onValueChange={setModel}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleziona modello" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gpt-4o-mini">GPT-4o mini</SelectItem>
+                    <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                    <SelectItem value="o4-mini">o4-mini (reasoning light)</SelectItem>
+                    <SelectItem value="o3-mini">o3-mini (reasoning)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -179,6 +194,8 @@ export default function CreateReportPage() {
                     language,
                     tone,
                     signature,
+                    notes,
+                    model,
                   });
                   setLastReportId(report?._id || null);
                   toast.success("Report generato");
