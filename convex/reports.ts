@@ -91,6 +91,43 @@ function pickInsights(diff: ReturnType<typeof computeDiff>) {
   return { wins, risks, actions };
 }
 
+function createMockData(): { current: Metrics[]; previous: Metrics[] } {
+  const campaigns = [
+    "Brand IT",
+    "Search Generic",
+    "Shopping Core",
+    "Display Prospecting",
+    "YouTube Awareness",
+    "Retargeting All",
+  ];
+  const rand = (min: number, max: number) => Math.random() * (max - min) + min;
+
+  const previous: Metrics[] = campaigns.map((name) => {
+    const clicks = Math.round(rand(500, 3000));
+    const impressions = clicks * Math.round(rand(10, 40));
+    const ctr = clicks / Math.max(1, impressions);
+    const costMicros = Math.round(rand(200, 1500)) * 1_000_000;
+    const conversions = Math.max(0, Math.round(rand(5, 80)));
+    const averageCpcMicros = Math.round(costMicros / Math.max(1, clicks));
+    const conversionsValue = Math.round(conversions * rand(20, 150));
+    return { campaign: name, clicks, impressions, ctr, costMicros, conversions, averageCpcMicros, conversionsValue };
+  });
+
+  const current: Metrics[] = previous.map((p) => {
+    const change = rand(0.8, 1.2);
+    const clicks = Math.max(1, Math.round(p.clicks * change));
+    const impressions = Math.max(clicks, Math.round(p.impressions * change * rand(0.9, 1.1)));
+    const ctr = clicks / impressions;
+    const costMicros = Math.max(100_000, Math.round(p.costMicros * change * rand(0.9, 1.15)));
+    const conversions = Math.max(0, Math.round(p.conversions * change * rand(0.8, 1.25)));
+    const averageCpcMicros = Math.round(costMicros / Math.max(1, clicks));
+    const conversionsValue = Math.round(conversions * rand(20, 150));
+    return { campaign: p.campaign, clicks, impressions, ctr, costMicros, conversions, averageCpcMicros, conversionsValue };
+  });
+
+  return { current, previous };
+}
+
 function buildEmail({
   clientName,
   periodLabel,
@@ -144,10 +181,8 @@ export const generateReport = action({
     const client = await ctx.runQuery(api.clients.listClients).then((cs: any[]) => cs.find((c: any) => c._id === args.clientId));
     if (!client || client.userTokenIdentifier !== identity.subject) throw new Error("Cliente non trovato");
 
-    // Ensure Google Ads token
-    const { accessToken } = await ctx.runAction(api.integrations.ensureAccessToken, { service: "google_ads" });
-
     const customerId = client.googleAdsCustomerId;
+    const isTest = customerId === "TEST";
     if (!customerId) throw new Error("Cliente senza Google Ads customerId");
 
     // current period
@@ -160,16 +195,24 @@ export const generateReport = action({
     const prevEnd = formatDate(new Date(args.periodStart - 24 * 60 * 60 * 1000));
 
     // fetch metrics
-    const integration: any = await ctx.runQuery(api.integrations.getIntegrationByUserService, {
-      userTokenIdentifier: identity.subject,
-      service: "google_ads",
-    });
-    const loginCustomerId = integration?.loginCustomerId ?? undefined;
-
-    const [current, previous] = await Promise.all([
-      fetchGoogleAdsCampaignMetrics({ accessToken, customerId, loginCustomerId, startDate: start, endDate: end }),
-      fetchGoogleAdsCampaignMetrics({ accessToken, customerId, loginCustomerId, startDate: prevStart, endDate: prevEnd }),
-    ]);
+    let current: Metrics[] = [];
+    let previous: Metrics[] = [];
+    if (isTest) {
+      const mock = createMockData();
+      current = mock.current;
+      previous = mock.previous;
+    } else {
+      const { accessToken } = await ctx.runAction(api.integrations.ensureAccessToken, { service: "google_ads" });
+      const integration: any = await ctx.runQuery(api.integrations.getIntegrationByUserService, {
+        userTokenIdentifier: identity.subject,
+        service: "google_ads",
+      });
+      const loginCustomerId = integration?.loginCustomerId ?? undefined;
+      [current, previous] = await Promise.all([
+        fetchGoogleAdsCampaignMetrics({ accessToken, customerId, loginCustomerId, startDate: start, endDate: end }),
+        fetchGoogleAdsCampaignMetrics({ accessToken, customerId, loginCustomerId, startDate: prevStart, endDate: prevEnd }),
+      ]);
+    }
 
     const diff = computeDiff(current, previous);
 

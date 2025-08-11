@@ -22,6 +22,7 @@ export default function CreateReportPage() {
   const [notes, setNotes] = useState("");
   const generate = useAction(api.reports.generateReport);
   const createDraft = useAction(api.reports.createGmailDraft);
+  const ensureTestClient = useAction(api.clients.ensureTestClient);
   const [loading, setLoading] = useState<{ gen?: boolean; draft?: boolean; dl?: boolean }>({});
   const selectedClient = useMemo(() => clients.find((c) => c._id === client), [clients, client]);
   const [lastReportId, setLastReportId] = useState<string | null>(null);
@@ -183,6 +184,18 @@ export default function CreateReportPage() {
 
           {/* Step 4 */}
           <div className="flex gap-2">
+            <Button size="sm" variant="outline" data-slot="button" data-variant="outline"
+              onClick={async () => {
+                try {
+                  const test = await ensureTestClient({} as any);
+                  setClient(test._id);
+                  toast.success("Cliente di test selezionato");
+                } catch (e) {
+                  toast.error("Errore creazione cliente di test");
+                }
+              }}>
+              Cliente di test
+            </Button>
             <Button size="sm" data-slot="button" data-variant="default" disabled={!client || !periodFrom || !periodTo || loading.gen}
               onClick={async () => {
                 try {
