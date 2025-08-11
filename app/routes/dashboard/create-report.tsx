@@ -3,11 +3,10 @@ import { useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
-import { Checkbox } from "~/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Label } from "~/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "~/components/ui/tabs";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
 
@@ -24,11 +23,11 @@ export default function CreateReportPage() {
   const [notes, setNotes] = useState("");
   const generate = useAction(api.reports.generateReport);
   const createDraft = useAction(api.reports.createGmailDraft);
-  const ensureTestClient = useAction(api.clients.ensureTestClient);
+  const ensureTestClient = useMutation(api.clients.ensureTestClient);
+  const sendNow = useAction(api.reports.sendGmailMessage as any);
   const [loading, setLoading] = useState<{ gen?: boolean; draft?: boolean; dl?: boolean }>({});
   const selectedClient = useMemo(() => clients.find((c) => c._id === client), [clients, client]);
   const [lastReportId, setLastReportId] = useState<string | null>(null);
-  const [useMock, setUseMock] = useState(false);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -206,18 +205,6 @@ export default function CreateReportPage() {
 
           {/* Step 4 */}
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" data-slot="button" data-variant="outline"
-              onClick={async () => {
-                try {
-                  const test = await ensureTestClient({} as any);
-                  setClient(test._id);
-                  toast.success("Cliente di test selezionato");
-                } catch (e) {
-                  toast.error("Errore creazione cliente di test");
-                }
-              }}>
-              Cliente di test
-            </Button>
             <Button size="sm" data-slot="button" data-variant="default" disabled={!client || !periodFrom || !periodTo || loading.gen}
               onClick={async () => {
                 try {
@@ -231,7 +218,6 @@ export default function CreateReportPage() {
                     signature,
                     notes,
                     model,
-                    useMock,
                   });
                   setLastReportId(report?._id || null);
                   toast.success("Report generato");
@@ -259,6 +245,23 @@ export default function CreateReportPage() {
                 }
               }}>
               {loading.draft ? "Creazione..." : "Apri in Gmail"}
+            </Button>
+            <Button size="sm" variant="outline" data-slot="button" data-variant="outline" disabled={!lastReportId || loading.dl}
+              onClick={async () => {
+                try {
+                  setLoading((s) => ({ ...s, dl: true }));
+                  const sender = prompt("Email mittente (Gmail)") || "";
+                  const recipient = prompt("Email destinatario") || "";
+                  if (!sender || !recipient) return;
+                  await sendNow({ reportId: lastReportId as any, senderEmail: sender, recipientEmail: recipient } as any);
+                  toast.success("Email inviata");
+                } catch {
+                  toast.error("Errore invio email");
+                } finally {
+                  setLoading((s) => ({ ...s, dl: false }));
+                }
+              }}>
+              Invia
             </Button>
             <Button size="sm" variant="outline" data-slot="button" data-variant="outline" disabled={!lastReportId}
               onClick={() => {

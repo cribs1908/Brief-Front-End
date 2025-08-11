@@ -381,6 +381,32 @@ export const createGmailDraft = action({
   },
 });
 
+export const sendGmailMessage = action({
+  args: { reportId: v.id("reports"), recipientEmail: v.string(), senderEmail: v.string() },
+  handler: async (ctx, args): Promise<{ messageId: string }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Non autenticato");
+    const report: any = await ctx.runQuery(api.reports.getReportById, { id: args.reportId });
+    if (!report || report.userTokenIdentifier !== identity.subject) throw new Error("Report non trovato");
+    const { accessToken }: any = await ctx.runAction(api.integrations.ensureAccessToken, { service: "gmail" });
+    const raw = buildEml({ from: args.senderEmail, to: args.recipientEmail, subject: report.subject, html: report.html });
+    const rawEncoded = base64UrlEncode(raw);
+    const res: any = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ message: { raw: rawEncoded } }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Gmail send error: ${text}`);
+    }
+    const data: any = await res.json();
+    await ctx.runMutation(api.reports.patchReport, { id: args.reportId, gmailMessageId: data.id } as any);
+    await ctx.runMutation(api.reports.markReportSent, { reportId: args.reportId });
+    return { messageId: data.id };
+  },
+});
+
 export const markReportSent = mutation({
   args: { reportId: v.id("reports") },
   handler: async (ctx, args) => {
@@ -420,9 +446,16 @@ export const getReportById = query({
 });
 
 export const patchReport = mutation({
-  args: { id: v.id("reports"), gmailDraftId: v.optional(v.string()) },
+  args: {
+    id: v.id("reports"),
+    gmailDraftId: v.optional(v.string()),
+    gmailMessageId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.id, { gmailDraftId: args.gmailDraftId, updatedAt: Date.now() });
+    const patch: any = { updatedAt: Date.now() };
+    if (args.gmailDraftId !== undefined) patch.gmailDraftId = args.gmailDraftId;
+    if (args.gmailMessageId !== undefined) patch.gmailMessageId = args.gmailMessageId;
+    await ctx.db.patch(args.id, patch);
   },
 });
 
