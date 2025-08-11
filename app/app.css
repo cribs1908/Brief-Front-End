@@ -243,11 +243,13 @@ table :where(thead, tbody) tr {
 
 /* Sidebar menu interaction states */
 [data-slot="sidebar-menu-button"] {
-  transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
+  transition: background-color 140ms ease, color 140ms ease, transform 140ms ease, filter 140ms ease;
 }
 [data-slot="sidebar-menu-button"]:hover {
   background-color: rgba(11, 30, 39, 0.9) !important;
   color: var(--sidebar-primary-foreground) !important;
+  transform: translateY(-1px);
+  filter: saturate(112%);
 }
 [data-slot="sidebar-menu-button"][data-active="true"] {
   background-color: var(--primary) !important;
@@ -286,6 +288,22 @@ table tbody tr:hover {
 }
 table tbody tr:nth-child(even) {
   background-color: rgba(12, 18, 26, 0.3);
+}
+
+/* Icon-rail collapsed: mantieni una stroke verticale coerente con il riquadro contenuti */
+[data-slot="sidebar"][data-variant="inset"][data-collapsible="icon"] [data-slot="sidebar-container"] {
+  border-right: 1px solid rgba(12, 18, 26, 0.9);
+}
+
+/* Allinea i menu button al centro quando collassato a icone e migliora la sensazione premium al hover */
+[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"] {
+  justify-content: center;
+}
+[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"] svg {
+  transition: transform 140ms ease;
+}
+[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"]:hover svg {
+  transform: translateY(-1px);
 }
 
 @layer base {
