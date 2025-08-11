@@ -229,10 +229,7 @@ export default function CreateReportPage() {
               onClick={async () => {
                 try {
                   setLoading((s) => ({ ...s, draft: true }));
-                  const sender = prompt("Email mittente (Gmail)") || "";
-                  const recipient = prompt("Email destinatario") || "";
-                  if (!sender || !recipient) return;
-                  await createDraft({ reportId: lastReportId as any, senderEmail: sender, recipientEmail: recipient });
+                  await createDraft({ reportId: lastReportId as any } as any);
                   toast.success("Bozza creata in Gmail");
                 } catch {
                   toast.error("Errore creazione bozza");
@@ -246,10 +243,7 @@ export default function CreateReportPage() {
               onClick={async () => {
                 try {
                   setLoading((s) => ({ ...s, dl: true }));
-                  const sender = prompt("Email mittente (Gmail)") || "";
-                  const recipient = prompt("Email destinatario") || "";
-                  if (!sender || !recipient) return;
-                  await sendNow({ reportId: lastReportId as any, senderEmail: sender, recipientEmail: recipient } as any);
+                  await sendNow({ reportId: lastReportId as any } as any);
                   toast.success("Email inviata");
                 } catch {
                   toast.error("Errore invio email");

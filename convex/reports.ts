@@ -350,21 +350,24 @@ function base64UrlEncode(str: string) {
   return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function buildEml({ from, to, subject, html }: { from: string; to: string; subject: string; html: string }) {
+function buildEml({ from, to, subject, html }: { from?: string; to: string; subject: string; html: string }) {
   const boundary = "mixed_boundary";
-  return `From: ${from}\nTo: ${to}\nSubject: ${subject}\nMIME-Version: 1.0\nContent-Type: multipart/alternative; boundary=\"${boundary}\"\n\n--${boundary}\nContent-Type: text/html; charset=\"UTF-8\"\n\n${html}\n\n--${boundary}--`;
+  const fromHeader = from ? `From: ${from}\n` : "";
+  return `${fromHeader}To: ${to}\nSubject: ${subject}\nMIME-Version: 1.0\nContent-Type: multipart/alternative; boundary=\"${boundary}\"\n\n--${boundary}\nContent-Type: text/html; charset=\"UTF-8\"\n\n${html}\n\n--${boundary}--`;
 }
 
 export const createGmailDraft = action({
-  args: { reportId: v.id("reports"), recipientEmail: v.string(), senderEmail: v.string() },
+  args: { reportId: v.id("reports") },
   handler: async (ctx, args): Promise<{ draftId: string }> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Non autenticato");
     const report: any = await ctx.runQuery(api.reports.getReportById, { id: args.reportId });
     if (!report || report.userTokenIdentifier !== identity.subject) throw new Error("Report non trovato");
+    const client: any = await ctx.runQuery(api.clients.listClients as any).then((cs: any[]) => cs.find((c) => c._id === report.clientId));
+    const toEmail: string = client?.preferences?.email || "info@gmail.com";
     // ensure Gmail access token
     const { accessToken }: any = await ctx.runAction(api.integrations.ensureAccessToken, { service: "gmail" });
-    const raw = buildEml({ from: args.senderEmail, to: args.recipientEmail, subject: report.subject, html: report.html });
+    const raw = buildEml({ to: toEmail, subject: report.subject, html: report.html });
     const rawEncoded = base64UrlEncode(raw);
     const res: any = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
       method: "POST",
@@ -382,19 +385,21 @@ export const createGmailDraft = action({
 });
 
 export const sendGmailMessage = action({
-  args: { reportId: v.id("reports"), recipientEmail: v.string(), senderEmail: v.string() },
+  args: { reportId: v.id("reports") },
   handler: async (ctx, args): Promise<{ messageId: string }> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Non autenticato");
     const report: any = await ctx.runQuery(api.reports.getReportById, { id: args.reportId });
     if (!report || report.userTokenIdentifier !== identity.subject) throw new Error("Report non trovato");
+    const client: any = await ctx.runQuery(api.clients.listClients as any).then((cs: any[]) => cs.find((c) => c._id === report.clientId));
+    const toEmail: string = client?.preferences?.email || "info@gmail.com";
     const { accessToken }: any = await ctx.runAction(api.integrations.ensureAccessToken, { service: "gmail" });
-    const raw = buildEml({ from: args.senderEmail, to: args.recipientEmail, subject: report.subject, html: report.html });
+    const raw = buildEml({ to: toEmail, subject: report.subject, html: report.html });
     const rawEncoded = base64UrlEncode(raw);
     const res: any = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ message: { raw: rawEncoded } }),
+      body: JSON.stringify({ raw: rawEncoded }),
     });
     if (!res.ok) {
       const text = await res.text();
