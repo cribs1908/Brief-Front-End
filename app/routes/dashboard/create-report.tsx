@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { Checkbox } from "~/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Label } from "~/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "~/components/ui/tabs";
@@ -26,6 +27,7 @@ export default function CreateReportPage() {
   const [loading, setLoading] = useState<{ gen?: boolean; draft?: boolean; dl?: boolean }>({});
   const selectedClient = useMemo(() => clients.find((c) => c._id === client), [clients, client]);
   const [lastReportId, setLastReportId] = useState<string | null>(null);
+  const [useMock, setUseMock] = useState(false);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -58,6 +60,10 @@ export default function CreateReportPage() {
               <div className="flex flex-col gap-2">
                 <Label>Periodo (a)</Label>
                 <Input value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} type="date" data-slot="input" />
+              </div>
+              <div className="flex items-center gap-2 md:col-span-1">
+                <Checkbox id="useMock" checked={useMock} onCheckedChange={(v: any) => setUseMock(!!v)} />
+                <Label htmlFor="useMock">Usa dati di test (mock)</Label>
               </div>
             </CardContent>
           </Card>
@@ -209,6 +215,7 @@ export default function CreateReportPage() {
                     signature,
                     notes,
                     model,
+                    useMock,
                   });
                   setLastReportId(report?._id || null);
                   toast.success("Report generato");

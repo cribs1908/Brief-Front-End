@@ -174,6 +174,7 @@ export const generateReport = action({
     signature: v.optional(v.string()),
     notes: v.optional(v.string()),
     model: v.optional(v.string()),
+    useMock: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<any> => {
     const identity = await ctx.auth.getUserIdentity();
@@ -182,7 +183,7 @@ export const generateReport = action({
     if (!client || client.userTokenIdentifier !== identity.subject) throw new Error("Cliente non trovato");
 
     const customerId = client.googleAdsCustomerId;
-    const isTest = customerId === "TEST";
+    const isTest = !!args.useMock || customerId === "TEST";
     if (!customerId) throw new Error("Cliente senza Google Ads customerId");
 
     // current period
