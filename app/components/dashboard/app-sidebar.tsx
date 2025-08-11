@@ -63,15 +63,15 @@ export function AppSidebar({
   variant: "sidebar" | "floating" | "inset";
   user: any;
 }) {
-  const { state } = useSidebar();
+  const { state, isMobile } = useSidebar();
 
   return (
-    <Sidebar collapsible="icon" variant={variant}>
+    <Sidebar collapsible="offcanvas" variant={variant}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem className="mb-2">
             <Link to="/" prefetch="viewport" className="block">
-              {state === "collapsed" ? (
+              {!isMobile && state === "collapsed" ? (
                 <img
                   src="/logobriefsecondo.png"
                   alt="Brief mark"
