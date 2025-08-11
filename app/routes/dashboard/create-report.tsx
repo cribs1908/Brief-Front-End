@@ -28,6 +28,8 @@ export default function CreateReportPage() {
   const [loading, setLoading] = useState<{ gen?: boolean; draft?: boolean; dl?: boolean }>({});
   const selectedClient = useMemo(() => clients.find((c) => c._id === client), [clients, client]);
   const [lastReportId, setLastReportId] = useState<string | null>(null);
+  const [generatedHtml, setGeneratedHtml] = useState<string>("");
+  const [generatedText, setGeneratedText] = useState<string>("");
 
   return (
     <div className="flex flex-1 flex-col">
@@ -141,34 +143,19 @@ export default function CreateReportPage() {
                   <TabsTrigger value="html">HTML</TabsTrigger>
                 </TabsList>
                 <TabsContent value="preview" className="space-y-6">
-                  <Section title="5 Win" items={["CTR in aumento del 12%","CPA ridotto del 9%","ROAS +15%","Top campaign: Brand IT","Clic +8% rispetto al periodo precedente"]} />
-                  <Section title="5 Rischi" items={["Calo conversioni su Search Generic (-7%)","CPC in aumento su Shopping","Campagna Display con bassa qualità","Budget limitato su Brand","ROAS instabile su Smart Shopping"]} />
-                  <Section title="3 Azioni" items={["Aumentare budget su Brand del 10%","Bloccare keyword con bassa qualità","Testare nuove creatività per Display"]} />
+                  <div className="relative overflow-hidden rounded-[12px] border border-[rgba(12,18,26,0.9)] bg-transparent">
+                    <div className="p-4 will-change-transform [animation:content-enter_280ms_cubic-bezier(0.2,0.8,0.2,1)_both]">
+                      {generatedHtml ? (
+                        <div className="prose prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: generatedHtml }} />
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Genera un report per vedere l’anteprima.</p>
+                      )}
+                    </div>
+                  </div>
                 </TabsContent>
                 <TabsContent value="html">
                   <pre className="text-xs whitespace-pre-wrap text-muted-foreground">
-{`<h3>Win</h3>
-<ul>
-  <li>CTR in aumento del 12%</li>
-  <li>CPA ridotto del 9%</li>
-  <li>ROAS +15%</li>
-  <li>Top campaign: Brand IT</li>
-  <li>Clic +8% rispetto al periodo precedente</li>
-</ul>
-<h3>Rischi</h3>
-<ul>
-  <li>Calo conversioni su Search Generic (-7%)</li>
-  <li>CPC in aumento su Shopping</li>
-  <li>Campagna Display con bassa qualità</li>
-  <li>Budget limitato su Brand</li>
-  <li>ROAS instabile su Smart Shopping</li>
-</ul>
-<h3>Azioni</h3>
-<ul>
-  <li>Aumentare budget su Brand del 10%</li>
-  <li>Bloccare keyword con bassa qualità</li>
-  <li>Testare nuove creatività per Display</li>
-</ul>`}
+                    {generatedHtml || "Nessun contenuto. Genera un report."}
                   </pre>
                 </TabsContent>
               </Tabs>
@@ -216,6 +203,8 @@ export default function CreateReportPage() {
                     model,
                   });
                   setLastReportId(report?._id || null);
+                  setGeneratedHtml(report?.html || "");
+                  setGeneratedText(report?.text || "");
                   toast.success("Report generato");
                 } catch (e) {
                   toast.error("Errore generazione");
@@ -279,4 +268,13 @@ function Section({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function GeneratedPreview() {
+  const [show, setShow] = useState(true);
+  // semplice contenitore: il contenuto HTML vero è in generatedHtml sopra
+  return (
+    <div className="[animation-duration:300ms]">
+      {/* lo spazio è riempito dal contenuto a monte via generatedHtml */}
+    </div>
+  );
+}
 

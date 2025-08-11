@@ -136,6 +136,7 @@ function buildEmail({
   risks,
   actions,
   signature,
+  language,
 }: {
   clientName: string;
   periodLabel: string;
@@ -144,24 +145,36 @@ function buildEmail({
   risks: string[];
   actions: string[];
   signature: string;
+  language?: string;
 }) {
-  const subject = `Aggiornamento performance Google Ads – ${clientName} (${periodLabel})`;
-  const html = `<!doctype html><html><body style="font-family:Inter,ui-sans-serif,sans-serif;color:#0b1e27;background:#fff;">
-  <p>${intro}</p>
-  <h3>5 Win</h3>
-  <ul>${wins.map((w) => `<li>${w}</li>`).join("")}</ul>
-  <h3>5 Rischi</h3>
-  <ul>${risks.map((r) => `<li>${r}</li>`).join("")}</ul>
-  <h3>3 Azioni</h3>
-  <ul>${actions.map((a) => `<li>${a}</li>`).join("")}</ul>
-  <pre style="white-space:pre-wrap;margin-top:16px;border-top:1px solid #eee;padding-top:8px;">${signature}</pre>
+  const isEn = language === "en";
+  const hWins = isEn ? "5 Wins" : "5 Win";
+  const hRisks = isEn ? "5 Risks" : "5 Rischi";
+  const hActions = isEn ? "3 Actions" : "3 Azioni";
+  const subject = isEn
+    ? `Google Ads performance update – ${clientName} (${periodLabel})`
+    : `Aggiornamento performance Google Ads – ${clientName} (${periodLabel})`;
+  const html = `<!doctype html><html><body style="font-family:Inter,ui-sans-serif,sans-serif;color:#DDE3EB;background:#080A0F;">
+  <p style=\"margin:0 0 12px 0;\">${intro}</p>
+  <h3 style=\"margin:16px 0 8px 0;\">${hWins}</h3>
+  <ul style=\"margin:0 0 16px 18px;\">${wins.map((w) => `<li>${w}</li>`).join("")}</ul>
+  <h3 style=\"margin:16px 0 8px 0;\">${hRisks}</h3>
+  <ul style=\"margin:0 0 16px 18px;\">${risks.map((r) => `<li>${r}</li>`).join("")}</ul>
+  <h3 style=\"margin:16px 0 8px 0;\">${hActions}</h3>
+  <ul style=\"margin:0 0 16px 18px;\">${actions.map((a) => `<li>${a}</li>`).join("")}</ul>
+  <pre style=\"white-space:pre-wrap;margin-top:16px;border-top:1px solid #0C121A;padding-top:8px;\">${signature}</pre>
   </body></html>`;
-  const text = `${intro}\n\nWin:\n- ${wins.join("\n- ")}\n\nRischi:\n- ${risks.join("\n- ")}\n\nAzioni:\n- ${actions.join("\n- ")}\n\n${signature}`;
+  const text = isEn
+    ? `${intro}\n\nWins:\n- ${wins.join("\n- ")}\n\nRisks:\n- ${risks.join("\n- ")}\n\nActions:\n- ${actions.join("\n- ")}\n\n${signature}`
+    : `${intro}\n\nWin:\n- ${wins.join("\n- ")}\n\nRischi:\n- ${risks.join("\n- ")}\n\nAzioni:\n- ${actions.join("\n- ")}\n\n${signature}`;
   return { subject, html, text };
 }
 
 async function buildAIPreamble({ language, tone }: { language: string; tone: string }) {
-  return `Scrivi in ${language} con tono ${tone}. Testo chiaro per non addetti ai lavori.`;
+  const isEn = language === "en";
+  const langInstr = isEn ? "Write in English." : "Scrivi in italiano.";
+  const toneInstr = isEn ? `Tone: ${tone}.` : `Tono: ${tone}.`;
+  return `${langInstr} ${toneInstr} Testo chiaro per non addetti ai lavori.`;
 }
 
 export const generateReport = action({
@@ -306,6 +319,7 @@ export const generateReport = action({
       risks: risksForEmail,
       actions: actionsForEmail,
       signature: args.signature || client.preferences?.signature || "",
+      language: args.language,
     });
 
     const now = Date.now();
