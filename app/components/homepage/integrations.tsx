@@ -87,15 +87,6 @@ export default function IntegrationsSection({
                       : "Get Started (Demo)"}
                   </Link>
                 </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <Link
-                    to="https://github.com/michaelshimeles/react-starter-kit"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    ⭐️ Start on GitHub
-                  </Link>
-                </Button>
               </div>
             </div>
           </div>
