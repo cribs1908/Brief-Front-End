@@ -11,7 +11,6 @@ import {
   SidebarHeader,
   SidebarMenu,
   SidebarMenuItem,
-  useSidebar,
 } from "~/components/ui/sidebar";
 
 const data = {
@@ -63,27 +62,17 @@ export function AppSidebar({
   variant: "sidebar" | "floating" | "inset";
   user: any;
 }) {
-  const { state, isMobile } = useSidebar();
-
   return (
     <Sidebar collapsible="offcanvas" variant={variant}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem className="mb-2">
             <Link to="/" prefetch="viewport" className="block">
-              {!isMobile && state === "collapsed" ? (
-                <img
-                  src="/logobriefsecondo.png"
-                  alt="Brief mark"
-                  className="h-6 w-6 object-contain mx-auto"
-                />
-              ) : (
-                <img
-                  src="/brief_logoo.png"
-                  alt="Brief logo"
-                  className="h-8 w-auto object-contain"
-                />
-              )}
+              <img
+                src="/brief_logoo.png"
+                alt="Brief logo"
+                className="h-8 w-auto object-contain"
+              />
             </Link>
           </SidebarMenuItem>
         </SidebarMenu>
