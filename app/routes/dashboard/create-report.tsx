@@ -47,8 +47,8 @@ export default function CreateReportPage() {
                   onValueChange={async (val) => {
                     if (val === TEST_CLIENT_VALUE) {
                       try {
-                        const test = await ensureTestClient({} as any);
-                        setClient(test._id);
+                        const test: any = await ensureTestClient({} as any);
+                        if (test && test._id) setClient(test._id);
                       } catch {
                         toast.error("Errore creazione cliente di test");
                       }
@@ -75,10 +75,6 @@ export default function CreateReportPage() {
               <div className="flex flex-col gap-2">
                 <Label>Periodo (a)</Label>
                 <Input value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} type="date" data-slot="input" />
-              </div>
-              <div className="flex items-center gap-2 md:col-span-1">
-                <Checkbox id="useMock" checked={useMock} onCheckedChange={(v: any) => setUseMock(!!v)} />
-                <Label htmlFor="useMock">Usa dati di test (mock)</Label>
               </div>
             </CardContent>
           </Card>

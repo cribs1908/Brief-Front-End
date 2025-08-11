@@ -9,17 +9,6 @@ export const listClients = query({
       .query("clients")
       .withIndex("by_user", (q) => q.eq("userTokenIdentifier", identity.subject))
       .collect();
-    // Garantisce che esista sempre una voce "Cliente di test" nella lista
-    const hasTest = rows.some((r: any) => r.googleAdsCustomerId === "TEST");
-    if (!hasTest) {
-      rows.unshift({
-        _id: "TEST_PLACEHOLDER" as any,
-        userTokenIdentifier: identity.subject,
-        name: "Cliente di test",
-        googleAdsCustomerId: "TEST",
-        preferences: { language: "it", tone: "amichevole", signature: "Team Agenzia\nFirma standard" },
-      } as any);
-    }
     return rows;
   },
 });
@@ -71,6 +60,7 @@ export const ensureTestClient = mutation({
         language: "it",
         tone: "amichevole",
         signature: "Team Agenzia\nFirma standard",
+        email: "info@gmail.com",
       },
       createdAt: now,
       updatedAt: now,

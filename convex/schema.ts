@@ -59,6 +59,7 @@ export default defineSchema({
         language: v.optional(v.string()),
         tone: v.optional(v.string()),
         signature: v.optional(v.string()),
+        email: v.optional(v.string()),
       })
     ),
     createdAt: v.number(),
