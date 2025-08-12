@@ -5,13 +5,33 @@ import { Button } from "~/components/ui/button";
 import { Separator } from "~/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Input } from "~/components/ui/input";
-import { useComparison } from "~/state/comparison";
+import { useComparison, isMinBetter } from "~/state/comparison";
 import { Checkbox } from "~/components/ui/checkbox";
 import { Label } from "~/components/ui/label";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "~/components/ui/tooltip";
+
+function ExecutiveSummary() {
+  const { state } = useComparison();
+  if (!state.table) return null;
+  const vendors = state.table.vendorMeta.map((v) => v.vendor);
+  const pick = (key: string) => state.table!.rows.find((r) => r.key === key);
+  const sla = pick("Uptime SLA (%)");
+  const price = pick("Monthly Price ($)");
+  const support = pick("Support Response (hrs)");
+  const s = (r: typeof sla) => (r ? r.values : []);
+  const text = `SLA: ${s(sla).join(" | ")}. Prezzo mensile: ${s(price).join(" | ")}. Risposta supporto (h): ${s(support).join(" | ")}.`;
+  return (
+    <div className="rounded-md border p-3 mb-3" data-slot="input">
+      <div className="text-sm text-muted-foreground">
+        Executive Summary (mock): {vendors.join(", ")}. {text}
+      </div>
+    </div>
+  );
+}
 
 export default function NewComparisonPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const { state, addFiles, removeFile, startProcessing, regenerateTable, setFilters, setSort, exportCSV, copyKeynote, saveToArchive } = useComparison();
+  const { state, addFiles, removeFile, startProcessing, regenerateTable, setFilters, setSort, exportCSV, copyKeynote, saveToArchive, togglePin, isPinned } = useComparison();
   const [savingName, setSavingName] = useState("");
 
   const onSelectFiles = useCallback((list: FileList | null) => {
@@ -108,7 +128,8 @@ export default function NewComparisonPage() {
                 <CardDescription>Vista interattiva (placeholder)</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center justify-between gap-3 mb-3">
+                <ExecutiveSummary />
+                <div className="flex items-center justify-between gap-3 mb-3 sticky top-[calc(var(--header-height)+8px)] bg-[--background] z-10 py-2">
                   <div className="flex items-center gap-2">
                     <Button data-slot="button" variant="outline" size="sm" onClick={exportCSV}>Esporta CSV</Button>
                     <Button data-slot="button" variant="outline" size="sm" onClick={copyKeynote}>Copia in Keynote</Button>
@@ -141,7 +162,7 @@ function FiltersQuick({ onChangeQuery }: { onChangeQuery: (q: string) => void })
 }
 
 function ComparisonTable() {
-  const { state, setSort } = useComparison();
+  const { state, setSort, togglePin, isPinned } = useComparison();
   const table = state.table!;
 
   const filteredRows = useMemo(() => {
@@ -174,9 +195,15 @@ function ComparisonTable() {
         <TableBody>
           {filteredRows.map((r) => (
             <TableRow key={r.key}>
-              <TableCell className="font-medium">{r.key}</TableCell>
+              <TableCell className="font-medium">
+                <div className="flex items-center gap-2">
+                  <button className="text-xs underline" onClick={() => togglePin(r.key)}>{isPinned(r.key) ? "Unpin" : "Pin"}</button>
+                  <span>{r.key}</span>
+                  <MetricInfo keyName={r.key} />
+                </div>
+              </TableCell>
               {r.values.map((v, i) => (
-                <TableCell key={i}>{renderCell(v)}</TableCell>
+                <TableCell key={i} className={bestClass(r, i, v)}>{renderCell(v)}</TableCell>
               ))}
             </TableRow>
           ))}
@@ -191,6 +218,23 @@ function renderCell(v: string | number | boolean | null) {
   if (typeof v === "boolean") return <span className="text-xs" data-slot="badge">{v ? "Vero" : "Falso"}</span>;
   if (typeof v === "number") return <span>{v}</span>;
   return <span>{v}</span>;
+}
+
+function bestClass(r: { key: string; type: "numeric" | "boolean" | "text"; values: any[] }, idx: number, v: any) {
+  if (r.type === "numeric") {
+    const nums = r.values.filter((x): x is number => typeof x === "number");
+    if (!nums.length || typeof v !== "number") return "";
+    const max = Math.max(...nums);
+    const min = Math.min(...nums);
+    const target = isMinBetter(r.key) ? min : max;
+    const isBest = v === target;
+    return isBest ? "bg-[rgba(11,30,39,0.5)]" : "";
+  }
+  if (r.type === "boolean") {
+    if (v === true) return "bg-[rgba(11,30,39,0.5)]";
+    return "";
+  }
+  return "";
 }
 
 function FiltersPanel() {
@@ -208,6 +252,18 @@ function FiltersPanel() {
         <Checkbox id="red-only" checked={filters.showRedFlagsOnly} onCheckedChange={() => setFilters({ ...filters, showRedFlagsOnly: !filters.showRedFlagsOnly })} />
         <Label htmlFor="red-only" className="text-sm">Mostra solo red flags</Label>
       </div>
+      <div className="flex items-center gap-2 py-1">
+        <Checkbox id="pinned-only" checked={filters.showPinnedOnly} onCheckedChange={() => setFilters({ ...filters, showPinnedOnly: !filters.showPinnedOnly })} />
+        <Label htmlFor="pinned-only" className="text-sm">Solo KPI fissati</Label>
+      </div>
+      <div className="flex items-center justify-between py-2">
+        <Label htmlFor="sig" className="text-sm">Solo differenze significative</Label>
+        <div className="flex items-center gap-2">
+          <Input id="sig" data-slot="input" className="h-8 w-20" value={filters.significancePercent} onChange={(e) => setFilters({ ...filters, significancePercent: Number(e.target.value) || 0 })} />
+          <span className="text-xs text-muted-foreground">%</span>
+          <Checkbox checked={filters.showSignificantOnly} onCheckedChange={() => setFilters({ ...filters, showSignificantOnly: !filters.showSignificantOnly })} />
+        </div>
+      </div>
       {Object.keys(filters.categories).map((k) => (
         <label key={k} className="flex items-center gap-2 py-1">
           <Checkbox checked={!!filters.categories[k]} onCheckedChange={() => toggle(k)} id={`cat-${k}`} />
@@ -218,6 +274,28 @@ function FiltersPanel() {
         <button className="underline" onClick={() => setFilters({ ...filters, categories: Object.fromEntries(Object.keys(filters.categories).map((k) => [k, true])) })}>Reset</button>
       </div>
     </div>
+  );
+}
+
+function MetricInfo({ keyName }: { keyName: string }) {
+  const descriptions: Record<string, string> = {
+    "Uptime SLA (%)": "Disponibilità garantita del servizio nel periodo. Valori > 99.9% sono considerati enterprise.",
+    "Monthly Price ($)": "Costo mensile del piano comparato; per questa metrica minore è migliore.",
+    "Support Response (hrs)": "Tempo medio di prima risposta del supporto; minore è migliore.",
+    "Throughput (req/s)": "Richieste al secondo gestibili dal sistema in condizioni nominali.",
+  };
+  const content = descriptions[keyName] || "Metrica comparativa derivata dai documenti caricati.";
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="text-xs text-muted-foreground underline decoration-dotted cursor-help">info</span>
+        </TooltipTrigger>
+        <TooltipContent>
+          <div className="max-w-xs text-xs leading-5">{content}</div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -250,8 +328,27 @@ function getVisibleRowsForUI(table: T) {
   if (table.filters.showDifferencesOnly) {
     rows = rows.filter((r) => new Set(r.values.map((v) => (v === null ? "—" : String(v)))).size > 1);
   }
+  if (table.filters.showSignificantOnly) {
+    const thr = Math.max(0, table.filters.significancePercent) / 100;
+    rows = rows.filter((r) => isSignificantRowUI(r, thr));
+  }
   if (table.filters.showRedFlagsOnly) rows = rows.filter(isRedFlagRow);
+  if (table.filters.showPinnedOnly && table.pinnedKeys.length) rows = rows.filter((r) => table.pinnedKeys.includes(r.key));
   if (table.sort) rows = [...rows].sort((a, b) => compareCells(a, b, table.sort!.columnIndex, table.sort!.direction));
+  if (table.pinnedKeys.length) {
+    const order = new Map(table.pinnedKeys.map((k, i) => [k, i] as const));
+    rows = rows.sort((a, b) => (order.has(a.key) || order.has(b.key) ? (order.get(a.key) ?? 1e9) - (order.get(b.key) ?? 1e9) : 0));
+  }
   return rows;
+}
+function isSignificantRowUI(r: T["rows"][number], thr: number) {
+  if (r.type !== "numeric") return true;
+  const nums = r.values.filter((v): v is number => typeof v === "number");
+  if (nums.length < 2) return false;
+  const max = Math.max(...nums);
+  const min = Math.min(...nums);
+  if (max === 0 && min === 0) return false;
+  const ratio = isMinBetter(r.key) ? (max - min) / max : (max - min) / min;
+  return ratio >= thr;
 }
 

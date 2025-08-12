@@ -9,6 +9,9 @@ export type FiltersState = {
   categories: Record<string, boolean>;
   showDifferencesOnly: boolean;
   showRedFlagsOnly: boolean;
+  showPinnedOnly: boolean;
+  showSignificantOnly: boolean;
+  significancePercent: number; // soglia differenza per considerare "significativo"
 };
 
 export type ComparisonTable = {
@@ -17,6 +20,7 @@ export type ComparisonTable = {
   rows: { key: string; type: "numeric" | "boolean" | "text"; category: string; values: (string | number | boolean | null)[] }[];
   sort: SortState;
   filters: FiltersState;
+  pinnedKeys: string[];
 };
 
 export type ArchiveItem = {
@@ -97,6 +101,9 @@ const defaultFilters: FiltersState = {
   categories: { Performance: true, Pricing: true, Compliance: true, Supporto: true, SDK: true },
   showDifferencesOnly: false,
   showRedFlagsOnly: false,
+  showPinnedOnly: false,
+  showSignificantOnly: false,
+  significancePercent: 10,
 };
 
 function toTitleCaseVendor(fileName: string): string {
@@ -197,6 +204,9 @@ type Ctx = {
   deleteFromArchive: (id: string) => void;
   setUnits: (u: UnitsPreferences) => void;
   setSynonyms: (m: SynonymsMap) => void;
+  togglePin: (metricKey: string) => void;
+  isPinned: (metricKey: string) => boolean;
+  getVisibleRows: () => State["table"] extends infer T ? T extends ComparisonTable ? T["rows"] : never : never;
 };
 
 const ComparisonContext = createContext<Ctx | null>(null);
@@ -226,7 +236,7 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
 
   const regenerateTable = useCallback(() => {
     const table = buildMockTable(state.files, state.synonyms);
-    dispatch({ type: "SET_TABLE", table });
+    dispatch({ type: "SET_TABLE", table: { ...table, pinnedKeys: [] } });
     dispatch({ type: "SET_RESULTS", has: true });
   }, [state.files, state.synonyms]);
 
@@ -260,15 +270,29 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
         return new Set(vals).size > 1;
       });
     }
+    // significant-only (numerico): spread percent > threshold
+    if (table.filters.showSignificantOnly) {
+      const thr = Math.max(0, table.filters.significancePercent) / 100;
+      rows = rows.filter((r) => isSignificantRow(r, thr));
+    }
     // red-flags-only
     if (table.filters.showRedFlagsOnly) {
       rows = rows.filter((r) => isRedFlagRow(r));
+    }
+    // pinned-only
+    if (table.filters.showPinnedOnly && table.pinnedKeys.length) {
+      rows = rows.filter((r) => table.pinnedKeys.includes(r.key));
     }
 
     // sorting
     if (table.sort) {
       const { columnIndex, direction } = table.sort;
       rows = [...rows].sort((a, b) => compareCells(a, b, columnIndex, direction));
+    }
+    // pin ordering: mantieni i "pinned" in testa nell'ordine di pin
+    if (table.pinnedKeys.length) {
+      const pinOrder = new Map(table.pinnedKeys.map((k, i) => [k, i] as const));
+      rows = rows.sort((a, b) => (pinOrder.has(a.key) || pinOrder.has(b.key) ? (pinOrder.get(a.key) ?? 1e9) - (pinOrder.get(b.key) ?? 1e9) : 0));
     }
     return rows;
   }, [state.table]);
@@ -327,6 +351,16 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
   const setUnits = useCallback((u: UnitsPreferences) => dispatch({ type: "SET_UNITS", units: u }), []);
   const setSynonyms = useCallback((m: SynonymsMap) => dispatch({ type: "SET_SYNONYMS", synonyms: m }), []);
 
+  const togglePin = useCallback((metricKey: string) => {
+    const t = state.table;
+    if (!t) return;
+    const exists = t.pinnedKeys.includes(metricKey);
+    const next = exists ? t.pinnedKeys.filter((k) => k !== metricKey) : [...t.pinnedKeys, metricKey];
+    dispatch({ type: "SET_TABLE", table: { ...t, pinnedKeys: next } });
+  }, [state.table]);
+
+  const isPinned = useCallback((metricKey: string) => !!state.table?.pinnedKeys.includes(metricKey), [state.table]);
+
   const ctx = useMemo<Ctx>(() => ({
     state,
     addFiles,
@@ -342,7 +376,10 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     deleteFromArchive,
     setUnits,
     setSynonyms,
-  }), [state, addFiles, removeFile, startProcessing, regenerateTable, setSort, setFilters, exportCSV, copyKeynote, saveToArchive, loadFromArchive, deleteFromArchive, setUnits, setSynonyms]);
+    togglePin,
+    isPinned,
+    getVisibleRows,
+  }), [state, addFiles, removeFile, startProcessing, regenerateTable, setSort, setFilters, exportCSV, copyKeynote, saveToArchive, loadFromArchive, deleteFromArchive, setUnits, setSynonyms, togglePin, isPinned, getVisibleRows]);
 
   return <ComparisonContext.Provider value={ctx}>{children}</ComparisonContext.Provider>;
 }
@@ -352,5 +389,36 @@ export function useComparison() {
   if (!ctx) throw new Error("useComparison must be used within ComparisonProvider");
   return ctx;
 }
+
+// Helpers esportati per UI
+export function isMinBetter(key: string) {
+  return key === "Monthly Price ($)" || key === "Support Response (hrs)";
+}
+export function compareCells(a: ComparisonTable["rows"][number], b: ComparisonTable["rows"][number], columnIndex: number, direction: "asc" | "desc") {
+  const av = columnIndex === 0 ? a.key : a.values[columnIndex - 1];
+  const bv = columnIndex === 0 ? b.key : b.values[columnIndex - 1];
+  let cmp = 0;
+  if (typeof av === "boolean" && typeof bv === "boolean") cmp = av === bv ? 0 : av ? -1 : 1;
+  else if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
+  else cmp = String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" });
+  return direction === "asc" ? cmp : -cmp;
+}
+export function isRedFlagRow(r: ComparisonTable["rows"][number]) {
+  if (r.key === "SOC2" || r.key === "GDPR") return r.values.some((v) => v === false);
+  if (r.key === "Support Response (hrs)") return r.values.some((v) => typeof v === "number" && v > 24);
+  if (r.key === "Uptime SLA (%)") return r.values.some((v) => typeof v === "number" && v < 99.9);
+  return false;
+}
+export function isSignificantRow(r: ComparisonTable["rows"][number], thresholdRatio: number) {
+  if (r.type !== "numeric") return true; // per boolean/text consideriamo non-bloccante
+  const nums = r.values.filter((v): v is number => typeof v === "number");
+  if (nums.length < 2) return false;
+  const max = Math.max(...nums);
+  const min = Math.min(...nums);
+  if (max === 0 && min === 0) return false;
+  const ratio = isMinBetter(r.key) ? (max - min) / max : (max - min) / min;
+  return ratio >= thresholdRatio;
+}
+
 
 
