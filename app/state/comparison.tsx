@@ -4,10 +4,16 @@ import { useLocalStorage } from "~/hooks/use-local-storage";
 
 export type ComparisonFile = { id: string; name: string; size: number };
 export type SortState = { columnIndex: number; direction: "asc" | "desc" } | null;
-export type FiltersState = { query: string; categories: Record<string, boolean> };
+export type FiltersState = {
+  query: string;
+  categories: Record<string, boolean>;
+  showDifferencesOnly: boolean;
+  showRedFlagsOnly: boolean;
+};
 
 export type ComparisonTable = {
   columns: string[]; // ["Metrica", ...fileNames]
+  vendorMeta: { vendor: string; source: string; docId: string; dateParsed: number }[];
   rows: { key: string; type: "numeric" | "boolean" | "text"; category: string; values: (string | number | boolean | null)[] }[];
   sort: SortState;
   filters: FiltersState;
@@ -86,20 +92,94 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-const defaultFilters: FiltersState = { query: "", categories: { Generale: true, Prezzi: true, SLA: true } };
+const defaultFilters: FiltersState = {
+  query: "",
+  categories: { Performance: true, Pricing: true, Compliance: true, Supporto: true, SDK: true },
+  showDifferencesOnly: false,
+  showRedFlagsOnly: false,
+};
+
+function toTitleCaseVendor(fileName: string): string {
+  const base = fileName.replace(/\.pdf$/i, "").replace(/[-_]/g, " ").trim();
+  return base
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+const MIN_IS_BETTER = new Set(["Monthly Price ($)", "Support Response (hrs)"]);
 
 function buildMockTable(files: ComparisonFile[], synonyms: SynonymsMap): ComparisonTable {
-  const fileNames = files.map((f) => f.name);
-  const columns = ["Metrica", ...fileNames];
-  const normalize = (term: string) => synonyms[term] || term;
-  const rows = [
-    { key: normalize("Feature A"), type: "boolean" as const, category: "Generale", values: [true, false, true] },
-    { key: normalize("Throughput"), type: "numeric" as const, category: "Prestazioni", values: [120, 80, 95] },
-    { key: normalize("SLA"), type: "text" as const, category: "SLA", values: ["99.9%", "99.5%", "99.95%"] },
-    { key: normalize("Prezzo"), type: "numeric" as const, category: "Prezzi", values: [49, 39, 59] },
-  ].map((r) => ({ ...r, values: r.values.slice(0, files.length) }));
+  const vendors = files.map((f) => toTitleCaseVendor(f.name));
+  const columns = ["Metrica", ...vendors];
+  const vendorMeta = files.map((f, i) => ({
+    vendor: vendors[i] || `Vendor ${i + 1}`,
+    source: f.name,
+    docId: `${Date.now()}-${i}`,
+    dateParsed: Date.now(),
+  }));
 
-  return { columns, rows, sort: null, filters: defaultFilters };
+  const normalize = (term: string) => synonyms[term] || term;
+  // Profiles: 0 High-Perf, 1 Balanced, 2 Budget, others random around
+  const profile = (idx: number) => (idx % 3 === 0 ? "high" : idx % 3 === 1 ? "balanced" : "budget");
+
+  const metric = (key: string, category: string, type: "numeric" | "boolean" | "text", values: any[]) => ({
+    key: normalize(key),
+    category,
+    type,
+    values: values.slice(0, files.length),
+  });
+
+  const numericByProfile = (base: { high: number; balanced: number; budget: number }, jitter = 0) =>
+    vendors.map((_, i) => {
+      const p = profile(i);
+      const val = p === "high" ? base.high : p === "balanced" ? base.balanced : base.budget;
+      const j = jitter ? (Math.random() * 2 - 1) * jitter : 0;
+      return Math.max(0, Math.round((val + j) * 100) / 100);
+    });
+
+  const booleanByProfile = (base: { high: boolean; balanced: boolean; budget: boolean }) =>
+    vendors.map((_, i) => (profile(i) === "high" ? base.high : profile(i) === "balanced" ? base.balanced : base.budget));
+
+  const pickFrom = (arr: string[], nMin: number, nMax: number) => {
+    const n = Math.min(arr.length, Math.max(nMin, Math.floor(Math.random() * (nMax - nMin + 1)) + nMin));
+    const copy = [...arr];
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const idx = Math.floor(Math.random() * copy.length);
+      out.push(copy.splice(idx, 1)[0]);
+    }
+    return out.join(", ");
+  };
+
+  const rows = [
+    metric("Throughput (req/s)", "Performance", "numeric", numericByProfile({ high: 2000, balanced: 1200, budget: 700 }, 150)),
+    metric("Concurrent Flags", "Performance", "numeric", numericByProfile({ high: 1000, balanced: 600, budget: 300 }, 50)),
+    metric("SDKs Supported (count)", "SDK", "numeric", numericByProfile({ high: 12, balanced: 8, budget: 5 }, 1)),
+    metric("Max Environments", "Performance", "numeric", numericByProfile({ high: 12, balanced: 8, budget: 6 }, 1)),
+    metric("Evaluations/ms", "Performance", "numeric", numericByProfile({ high: 150, balanced: 90, budget: 60 }, 5)),
+    metric("Data Retention (days)", "Performance", "numeric", numericByProfile({ high: 365, balanced: 180, budget: 90 }, 10)),
+    metric("Uptime SLA (%)", "Compliance", "numeric", numericByProfile({ high: 99.99, balanced: 99.9, budget: 99.5 }, 0.05)),
+    metric("Monthly Price ($)", "Pricing", "numeric", numericByProfile({ high: 199, balanced: 99, budget: 49 }, 5)),
+    metric("Seats Included", "Pricing", "numeric", numericByProfile({ high: 50, balanced: 20, budget: 10 }, 2)),
+    metric("Support Response (hrs)", "Supporto", "numeric", numericByProfile({ high: 2, balanced: 8, budget: 24 }, 1)),
+
+    metric("Audit Logs", "Compliance", "boolean", booleanByProfile({ high: true, balanced: true, budget: false })),
+    metric("SAML/SSO", "Compliance", "boolean", booleanByProfile({ high: true, balanced: true, budget: false })),
+    metric("SOC2", "Compliance", "boolean", booleanByProfile({ high: true, balanced: true, budget: false })),
+    metric("GDPR", "Compliance", "boolean", booleanByProfile({ high: true, balanced: true, budget: true })),
+    metric("On-Prem / Self-Host", "Compliance", "boolean", booleanByProfile({ high: true, balanced: false, budget: false })),
+
+    metric("Pricing Model", "Pricing", "text", vendors.map((_, i) => (profile(i) === "high" ? "Usage-Based" : profile(i) === "balanced" ? "Tiered" : "Flat"))),
+    metric("SLA Tier", "Compliance", "text", vendors.map((_, i) => (profile(i) === "high" ? "Enterprise" : profile(i) === "balanced" ? "Premium" : "Standard"))),
+    metric("Flag Types", "SDK", "text", vendors.map(() => pickFrom(["Boolean", "Multivariant", "Dynamic"], 2, 3))),
+    metric("Rollout Strategies", "SDK", "text", vendors.map(() => pickFrom(["Gradual", "Targeted", "A/B", "Rules"], 2, 4))),
+    metric("Environments", "SDK", "text", vendors.map(() => pickFrom(["Dev", "Staging", "Prod"], 2, 3))),
+    metric("SDK Languages", "SDK", "text", vendors.map(() => pickFrom(["Java", "JS", "Python", "Go", "Swift", "Ruby", "C#"], 3, 6))),
+  ];
+
+  return { columns, vendorMeta, rows, sort: null, filters: defaultFilters };
 }
 
 type Ctx = {
@@ -165,10 +245,39 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
   const setSort = useCallback((sort: SortState) => dispatch({ type: "SET_TABLE_SORT", sort }), []);
   const setFilters = useCallback((filters: FiltersState) => dispatch({ type: "SET_TABLE_FILTERS", filters }), []);
 
+  const getVisibleRows = useCallback(() => {
+    const table = state.table;
+    if (!table) return [] as typeof state.table.rows;
+    const activeCats = Object.entries(table.filters.categories).filter(([, v]) => v).map(([k]) => k);
+    let rows = table.rows.filter((r) => activeCats.includes(r.category));
+    const q = table.filters.query.trim().toLowerCase();
+    if (q) rows = rows.filter((r) => r.key.toLowerCase().includes(q));
+
+    // differences-only
+    if (table.filters.showDifferencesOnly) {
+      rows = rows.filter((r) => {
+        const vals = r.values.map((v) => (v === null ? "—" : String(v)));
+        return new Set(vals).size > 1;
+      });
+    }
+    // red-flags-only
+    if (table.filters.showRedFlagsOnly) {
+      rows = rows.filter((r) => isRedFlagRow(r));
+    }
+
+    // sorting
+    if (table.sort) {
+      const { columnIndex, direction } = table.sort;
+      rows = [...rows].sort((a, b) => compareCells(a, b, columnIndex, direction));
+    }
+    return rows;
+  }, [state.table]);
+
   const exportCSV = useCallback(() => {
     if (!state.table) return;
+    const rows = getVisibleRows();
     const lines = [state.table.columns.join(",")];
-    for (const row of state.table.rows) {
+    for (const row of rows) {
       const vals = row.values.map((v) => (v === null ? "" : String(v)));
       lines.push([row.key, ...vals].join(","));
     }
@@ -179,17 +288,19 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     a.download = "confronto.csv";
     a.click();
     URL.revokeObjectURL(url);
-  }, [state.table]);
+  }, [state.table, getVisibleRows]);
 
   const copyKeynote = useCallback(async () => {
     if (!state.table) return;
+    const rows = getVisibleRows();
     const lines = [state.table.columns.join("\t")];
-    for (const row of state.table.rows) {
+    for (const row of rows) {
       const vals = row.values.map((v) => (v === null ? "" : String(v)));
       lines.push([row.key, ...vals].join("\t"));
     }
+    lines.push("\n— Generated by Brief (demo)");
     await navigator.clipboard.writeText(lines.join("\n"));
-  }, [state.table]);
+  }, [state.table, getVisibleRows]);
 
   const saveToArchive = useCallback((name: string) => {
     if (!state.table) return;

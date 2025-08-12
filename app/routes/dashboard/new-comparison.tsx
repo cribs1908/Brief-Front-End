@@ -145,24 +145,9 @@ function ComparisonTable() {
   const table = state.table!;
 
   const filteredRows = useMemo(() => {
-    let rows = table.rows;
-    const q = table.filters.query.trim().toLowerCase();
-    if (q) rows = rows.filter((r) => r.key.toLowerCase().includes(q));
-    // categorie: se presenti in filters.categories
-    const actives = Object.entries(table.filters.categories).filter(([, v]) => v).map(([k]) => k);
-    if (actives.length) rows = rows.filter((r) => actives.includes(r.category));
-    // ordinamento
-    if (table.sort) {
-      const { columnIndex, direction } = table.sort;
-      rows = [...rows].sort((a, b) => {
-        const av = columnIndex === 0 ? a.key : a.values[columnIndex - 1];
-        const bv = columnIndex === 0 ? b.key : b.values[columnIndex - 1];
-        const cmp = String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" });
-        return direction === "asc" ? cmp : -cmp;
-      });
-    }
-    return rows;
-  }, [table]);
+    // delega alla logica condivisa per coerenza con export/copy
+    return state.table ? getVisibleRowsForUI(state.table) : [];
+  }, [state.table]);
 
   const onSort = (idx: number) => {
     const next = !table.sort || table.sort.columnIndex !== idx
@@ -215,6 +200,14 @@ function FiltersPanel() {
   return (
     <div className="rounded-md border p-3" data-slot="input">
       <div className="text-sm font-medium mb-2">Filtri</div>
+      <div className="flex items-center gap-2 py-1">
+        <Checkbox id="diff-only" checked={filters.showDifferencesOnly} onCheckedChange={() => setFilters({ ...filters, showDifferencesOnly: !filters.showDifferencesOnly })} />
+        <Label htmlFor="diff-only" className="text-sm">Mostra solo differenze</Label>
+      </div>
+      <div className="flex items-center gap-2 py-1">
+        <Checkbox id="red-only" checked={filters.showRedFlagsOnly} onCheckedChange={() => setFilters({ ...filters, showRedFlagsOnly: !filters.showRedFlagsOnly })} />
+        <Label htmlFor="red-only" className="text-sm">Mostra solo red flags</Label>
+      </div>
       {Object.keys(filters.categories).map((k) => (
         <label key={k} className="flex items-center gap-2 py-1">
           <Checkbox checked={!!filters.categories[k]} onCheckedChange={() => toggle(k)} id={`cat-${k}`} />
@@ -226,5 +219,39 @@ function FiltersPanel() {
       </div>
     </div>
   );
+}
+
+// Helpers condivisi lato UI (mock-only)
+import { type ComparisonTable as T } from "~/state/comparison";
+function isMinBetter(key: string) {
+  return key === "Monthly Price ($)" || key === "Support Response (hrs)";
+}
+function compareCells(a: T["rows"][number], b: T["rows"][number], columnIndex: number, direction: "asc" | "desc") {
+  const av = columnIndex === 0 ? a.key : a.values[columnIndex - 1];
+  const bv = columnIndex === 0 ? b.key : b.values[columnIndex - 1];
+  // boolean -> true first; numeric -> numeric compare; text -> localeCompare
+  let cmp = 0;
+  if (typeof av === "boolean" && typeof bv === "boolean") cmp = (av === bv ? 0 : av ? -1 : 1);
+  else if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
+  else cmp = String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" });
+  return direction === "asc" ? cmp : -cmp;
+}
+function isRedFlagRow(r: T["rows"][number]) {
+  if (r.key === "SOC2" || r.key === "GDPR") return r.values.some((v) => v === false);
+  if (r.key === "Support Response (hrs)") return r.values.some((v) => typeof v === "number" && v > 24);
+  if (r.key === "Uptime SLA (%)") return r.values.some((v) => typeof v === "number" && v < 99.9);
+  return false;
+}
+function getVisibleRowsForUI(table: T) {
+  const activeCats = Object.entries(table.filters.categories).filter(([, v]) => v).map(([k]) => k);
+  let rows = table.rows.filter((r) => activeCats.includes(r.category));
+  const q = table.filters.query.trim().toLowerCase();
+  if (q) rows = rows.filter((r) => r.key.toLowerCase().includes(q));
+  if (table.filters.showDifferencesOnly) {
+    rows = rows.filter((r) => new Set(r.values.map((v) => (v === null ? "—" : String(v)))).size > 1);
+  }
+  if (table.filters.showRedFlagsOnly) rows = rows.filter(isRedFlagRow);
+  if (table.sort) rows = [...rows].sort((a, b) => compareCells(a, b, table.sort!.columnIndex, table.sort!.direction));
+  return rows;
 }
 
