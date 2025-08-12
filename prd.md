@@ -1,89 +1,103 @@
-Product Requirements Document – MVP
-1. Visione del prodotto
-Creare uno strumento estremamente semplice e focalizzato per agenzie di marketing che gestiscono campagne Google Ads, capace di trasformare i dati pubblicitari in una email “client-ready” chiara, sintetica e immediatamente inviabile.
-L’obiettivo è ridurre drasticamente il tempo speso nella preparazione di report narrativi e migliorare la comunicazione con i clienti, evitando dashboard complesse e file PDF che vengono spesso ignorati.
+# PRD – PDF Comparison Tool
 
-2. Problema da risolvere
-Le agenzie PPC devono inviare report regolari sulle performance delle campagne ai loro clienti.
+## 1. Vision
+Semplificare e velocizzare il processo di confronto di documenti tecnici PDF per buyer B2B, fornendo una piattaforma intelligente e collaborativa che trasforma documenti complessi in tabelle comparative pronte all’uso.  
+Vogliamo eliminare il lavoro manuale di estrazione e normalizzazione delle specifiche, ridurre i tempi di decisione e migliorare la qualità delle analisi, creando al tempo stesso un archivio di conoscenza riutilizzabile.
 
-Il processo attuale richiede:
+---
 
-Raccolta manuale dei dati da Google Ads.
+## 2. Obiettivo del Prodotto
+Costruire un'applicazione SaaS che consenta di:
+- Caricare PDF di competitor (spec sheet, datasheet, piani SaaS, listini API).
+- Estrarre automaticamente dati strutturati.
+- Normalizzare termini e unità di misura.
+- Presentare i dati in una tabella comparativa interattiva.
+- Permettere export in diversi formati (CSV, presentazioni).
+- Offrire funzionalità avanzate come scansioni di compliance (“red-flag scan”) e insight di mercato aggregati.
 
-Analisi e confronto con i periodi precedenti.
+---
 
-Scrittura di un testo chiaro e comprensibile per clienti non tecnici.
+## 3. Perché lo stiamo sviluppando
+### Problema Attuale
+- Buyer e team di procurement spendono ore/giorni a leggere documenti complessi e non standardizzati.
+- Il processo manuale causa ritardi nelle decisioni e aumenta il rischio di errori.
+- Mancano strumenti verticali che trasformino PDF tecnici in comparazioni strutturate.
 
-Formattazione e invio del report.
+### Opportunità di Mercato
+- Settore B2B in crescita, forte richiesta di strumenti per l’automazione dei processi decisionali.
+- Assenza di competitor diretti con la stessa combinazione di estrazione dati + normalizzazione + output pronto per presentazioni.
+- Possibilità di iniziare in una nicchia (feature flags SaaS) ed espandere in altri verticali (cloud, hardware, API, cybersecurity).
 
-Questo processo è ripetitivo, time-consuming e soggetto a errori, e riduce il tempo che il team può dedicare all’ottimizzazione delle campagne.
+---
 
-I tool esistenti offrono dashboard e PDF con grafici, ma non forniscono direttamente un’email narrativa già pronta per il cliente.
+## 4. Funzioni Principali
+### Core
+1. **Caricamento PDF**
+   - Drag-and-drop multiplo.
+   - Supporto a file PDF digitali e scannerizzati.
+2. **Estrazione Dati**
+   - OCR per PDF scannerizzati.
+   - Parsing tabelle e testo (Tabula + LangChain).
+3. **Normalizzazione**
+   - Mappa di sinonimi per uniformare termini tecnici.
+   - Conversione automatica unità di misura.
+4. **Tabella Comparativa Interattiva**
+   - Ordinamento e filtraggio.
+   - Evidenziazione automatica valori migliori.
+5. **Esportazione**
+   - CSV.
+   - Presentazioni (Keynote/PowerPoint ready).
+   - Salvataggio in archivio interno.
 
-3. Soluzione proposta
-Un prodotto che, collegandosi a Google Ads e Gmail, genera automaticamente una bozza email strutturata con:
+### Avanzate
+6. **Red-Flag Scan**
+   - Evidenzia mancanze di compliance (SOC2, GDPR, ecc.).
+7. **Insight Aggregati**
+   - Statistiche anonime ricavate dai confronti globali.
+   - API per accesso ai dati.
 
-5 Win: miglioramenti o risultati positivi rilevanti.
+---
 
-5 Rischi: criticità, metriche in calo o potenziali problemi.
+## 5. Target Utente
+- Buyer e team di procurement B2B.
+- Responsabili IT che valutano fornitori software/hardware.
+- Consulenti e analisti di mercato.
+- Enterprise con processi di acquisto complessi e multi-vendor.
 
-3 Azioni: raccomandazioni operative chiare e concrete.
+---
 
-La bozza sarà:
+## 6. KPI di Successo
+- Riduzione tempo medio per completare un confronto del 70%.
+- Adozione del tool in almeno 3 verticali diversi entro 12 mesi.
+- Tasso di retention mensile > 80%.
+- Crescita base di dati (sinonimi, metriche) con > 10k upload entro il primo anno.
 
-Personalizzabile in lingua e tono di voce.
+---
 
-Arricchita con dati concreti (nomi campagne, variazioni % e KPI).
+## 7. Roadmap Iniziale
+**Fase 1 – MVP (3 mesi)**
+- Funzioni di caricamento, estrazione, normalizzazione base.
+- Tabella comparativa interattiva.
+- Export CSV.
+- Focus su nicchia "feature flags platforms".
 
-Salvata direttamente in Gmail come bozza pronta all’invio o scaricabile in .eml/.pdf.
+**Fase 2 – Espansione Funzionalità**
+- Export presentazioni.
+- Archivio e gestione confronti salvati.
+- Miglioramento mappa sinonimi con apprendimento continuo.
 
-4. Feature del primo MVP
-4.1 Integrazione Google Ads
-Connessione sicura via OAuth con permessi di sola lettura.
+**Fase 3 – Funzioni Avanzate**
+- Red-Flag Scan.
+- API dati aggregati.
+- Espansione a nuovi verticali.
 
-Recupero metriche principali (spesa, clic, CTR, conversioni, CPA, ROAS).
+---
 
-Confronto automatico tra periodo attuale e precedente.
+## 8. Differenziazione rispetto a strumenti generici (es. ChatGPT)
+- Pipeline specializzata per documenti tecnici PDF.
+- Normalizzazione terminologica automatica e continua.
+- Output strutturato pronto per decision-making e presentazioni.
+- Compliance scan integrata.
+- Collaborazione e archiviazione centralizzata dei confronti.
 
-Segmentazione per campagna.
-
-Identificazione automatica di campagne top performer e sotto-performanti.
-
-4.2 Generazione narrativa AI
-Creazione di testo chiaro e comprensibile per non addetti ai lavori.
-
-Struttura fissa: 5 Win, 5 Rischi, 3 Azioni.
-
-Personalizzazione lingua (es. italiano, inglese).
-
-Personalizzazione tono (formale, amichevole, diretto).
-
-Inserimento di nomi campagne, variazioni percentuali e KPI rilevanti.
-
-4.3 Integrazione Gmail
-Connessione sicura via OAuth.
-
-Creazione bozza email con:
-
-Oggetto precompilato.
-
-Corpo email in HTML pronto all’invio.
-
-Firma predefinita dell’agenzia.
-
-Opzione di download in formato .eml o .pdf.
-
-4.4 Automazione e schedulazione
-Schedulazione automatica (es. ogni lunedì alle 09:00).
-
-Generazione manuale del report in qualsiasi momento.
-
-Notifica interna quando la bozza è pronta.
-
-4.5 Gestione multi-cliente
-Collegamento di più account Google Ads.
-
-Configurazioni personalizzate per ogni cliente (lingua, tono, firma).
-
-Cronologia dei report generati per ciascun cliente.
-
+---

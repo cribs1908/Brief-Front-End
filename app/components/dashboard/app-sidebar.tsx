@@ -1,5 +1,5 @@
-import { IconDashboard, IconSettings, IconReportAnalytics, IconCalendarTime, IconUsersGroup, IconLink } from "@tabler/icons-react";
-import { Wand2 } from "lucide-react";
+import { IconDashboard, IconSettings, IconArchive, IconChartBar, IconFileUpload } from "@tabler/icons-react";
+import { Button } from "~/components/ui/button";
 import { Link } from "react-router";
 import { NavMain } from "./nav-main";
 import { NavSecondary } from "./nav-secondary";
@@ -20,31 +20,9 @@ const data = {
       url: "/dashboard",
       icon: IconDashboard,
     },
-    {
-      title: "Create Report",
-      url: "/dashboard/create-report",
-      icon: Wand2,
-    },
-    {
-      title: "Reports",
-      url: "/dashboard/reports",
-      icon: IconReportAnalytics,
-    },
-    {
-      title: "Clients",
-      url: "/dashboard/clients",
-      icon: IconUsersGroup,
-    },
-    {
-      title: "Integrations",
-      url: "/dashboard/integrations",
-      icon: IconLink,
-    },
-    {
-      title: "Scheduling",
-      url: "/dashboard/scheduling",
-      icon: IconCalendarTime,
-    },
+    { title: "Nuovo Confronto", url: "/dashboard/new-comparison", icon: IconFileUpload },
+    { title: "Archivio", url: "/dashboard/archive", icon: IconArchive },
+    { title: "Statistiche", url: "/dashboard/stats", icon: IconChartBar },
   ],
   navSecondary: [
     {
@@ -81,7 +59,16 @@ export function AppSidebar({
         <NavMain items={data.navMain} />
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
-      <SidebarFooter>{user && <NavUser user={user} />}</SidebarFooter>
+      <SidebarFooter>
+        <div className="flex flex-col gap-3 w-full">
+          <Link to="/dashboard/new-comparison" prefetch="intent" className="w-full">
+            <Button data-slot="button" className="w-full" size="sm">
+              <IconFileUpload className="mr-2" size={16} /> Carica PDF
+            </Button>
+          </Link>
+          {user && <NavUser user={user} />}
+        </div>
+      </SidebarFooter>
     </Sidebar>
   );
 }

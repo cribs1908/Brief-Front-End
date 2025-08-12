@@ -3,8 +3,6 @@ import { paymentWebhook } from "./subscriptions";
 import { httpAction } from "./_generated/server";
 import { openai } from "@ai-sdk/openai";
 import { streamText } from "ai";
-import { googleOAuthCallback } from "./integrations";
-import { api } from "./_generated/api";
 
 export const chat = httpAction(async (ctx, req) => {
   // Extract the `messages` from the body of the request
@@ -100,53 +98,7 @@ http.route({
   handler: paymentWebhook,
 });
 
-// OAuth callbacks
-http.route({
-  path: "/oauth/google-ads/callback",
-  method: "GET",
-  handler: googleOAuthCallback,
-});
-
-http.route({
-  path: "/oauth/gmail/callback",
-  method: "GET",
-  handler: googleOAuthCallback,
-});
-
-// Duplicate routes under /api/* in caso alcuni proxy o ambienti richiedano prefisso
-http.route({
-  path: "/api/oauth/google-ads/callback",
-  method: "GET",
-  handler: googleOAuthCallback,
-});
-
-http.route({
-  path: "/api/oauth/gmail/callback",
-  method: "GET",
-  handler: googleOAuthCallback,
-});
-
-// Download EML by report id (query ?id=...)
-http.route({
-  path: "/reports/download/eml",
-  method: "GET",
-  handler: httpAction(async (ctx, req) => {
-    const url = new URL(req.url);
-    const id = url.searchParams.get("id");
-    if (!id) return new Response("Missing id", { status: 400 });
-    // We cannot get auth in httpAction; for MVP only, fetch directly.
-    const report = await ctx.runQuery(api.reports.getReportById as any, { id } as any).catch(() => null);
-    if (!report) return new Response("Not found", { status: 404 });
-    const content = `From: noreply@example.com\nTo: client@example.com\nSubject: ${report.subject}\nMIME-Version: 1.0\nContent-Type: text/html; charset=\"UTF-8\"\n\n${report.html}`;
-    return new Response(content, {
-      status: 200,
-      headers: {
-        "Content-Type": "message/rfc822",
-        "Content-Disposition": `attachment; filename=report-${report._id}.eml`,
-      },
-    });
-  }),
-});
+// Rimosse route OAuth legacy e download report obsoleti
 
 // Log that routes are configured
 console.log("HTTP routes configured");
