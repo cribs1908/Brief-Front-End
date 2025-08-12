@@ -2,7 +2,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useReducer } from "react";
 import { useLocalStorage } from "~/hooks/use-local-storage";
 
-export type ComparisonFile = { id: string; name: string; size: number };
+export type ComparisonFile = { id: string; name: string; size: number; vendorName?: string };
 export type SortState = { columnIndex: number; direction: "asc" | "desc" } | null;
 export type FiltersState = {
   query: string;
@@ -12,6 +12,7 @@ export type FiltersState = {
   showPinnedOnly: boolean;
   showSignificantOnly: boolean;
   significancePercent: number; // soglia differenza per considerare "significativo"
+  priority: "Performance" | "Compliance" | "Pricing";
 };
 
 export type ComparisonTable = {
@@ -104,6 +105,7 @@ const defaultFilters: FiltersState = {
   showPinnedOnly: false,
   showSignificantOnly: false,
   significancePercent: 10,
+  priority: "Performance",
 };
 
 function toTitleCaseVendor(fileName: string): string {
@@ -118,7 +120,7 @@ function toTitleCaseVendor(fileName: string): string {
 const MIN_IS_BETTER = new Set(["Monthly Price ($)", "Support Response (hrs)"]);
 
 function buildMockTable(files: ComparisonFile[], synonyms: SynonymsMap): ComparisonTable {
-  const vendors = files.map((f) => toTitleCaseVendor(f.name));
+  const vendors = files.map((f) => f.vendorName?.trim() || toTitleCaseVendor(f.name));
   const columns = ["Metrica", ...vendors];
   const vendorMeta = files.map((f, i) => ({
     vendor: vendors[i] || `Vendor ${i + 1}`,
@@ -193,6 +195,7 @@ type Ctx = {
   state: State;
   addFiles: (files: FileList | File[]) => void;
   removeFile: (id: string) => void;
+  renameVendor: (fileId: string, vendorName: string) => void;
   startProcessing: () => Promise<void>;
   regenerateTable: () => void;
   setSort: (sort: SortState) => void;
@@ -233,6 +236,18 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const removeFile = useCallback((id: string) => dispatch({ type: "REMOVE_FILE", id }), []);
+
+  const renameVendor = useCallback((fileId: string, vendorName: string) => {
+    const nextFiles = state.files.map((f) => (f.id === fileId ? { ...f, vendorName } : f));
+    // Aggiorna files e rigenera tabella per riflettere i nuovi nomi vendor
+    // Nota: essendo mock, rigeneriamo semplicemente la tabella
+    const nextState: State = { ...state, files: nextFiles };
+    // dispatch sequenziale per mantenere reducer semplice
+    dispatch({ type: "ADD_FILES", files: nextFiles });
+    const table = buildMockTable(nextFiles, state.synonyms);
+    dispatch({ type: "SET_TABLE", table: { ...table, pinnedKeys: state.table?.pinnedKeys || [] } });
+    dispatch({ type: "SET_RESULTS", has: !!nextFiles.length });
+  }, [state]);
 
   const regenerateTable = useCallback(() => {
     const table = buildMockTable(state.files, state.synonyms);
@@ -365,6 +380,7 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     state,
     addFiles,
     removeFile,
+    renameVendor,
     startProcessing,
     regenerateTable,
     setSort,
