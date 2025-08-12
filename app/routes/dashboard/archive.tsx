@@ -3,12 +3,11 @@ import { useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Input } from "~/components/ui/input";
+import { useComparison } from "~/state/comparison";
 
 export default function ArchivePage() {
-  const items = useMemo(() => [
-    { id: "1", name: "Confronto Feature Flags", date: "2025-08-10", pdfs: 3 },
-    { id: "2", name: "SDK Auth Providers", date: "2025-08-08", pdfs: 2 },
-  ], []);
+  const { state, loadFromArchive, deleteFromArchive } = useComparison();
+  const items = useMemo(() => state.archive, [state.archive]);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -29,16 +28,20 @@ export default function ArchivePage() {
                     <TableHead>Nome</TableHead>
                     <TableHead>Data</TableHead>
                     <TableHead>PDF</TableHead>
-                    <TableHead></TableHead>
+                    <TableHead className="text-right">Azioni</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {items.map((it) => (
                     <TableRow key={it.id}>
                       <TableCell className="font-medium">{it.name}</TableCell>
-                      <TableCell>{it.date}</TableCell>
-                      <TableCell>{it.pdfs}</TableCell>
-                      <TableCell className="text-right text-sm text-muted-foreground">Apri</TableCell>
+                      <TableCell>{new Date(it.createdAt).toLocaleDateString()}</TableCell>
+                      <TableCell>{it.files.length}</TableCell>
+                      <TableCell className="text-right text-sm">
+                        <button className="underline mr-3" onClick={() => loadFromArchive(it.id)}>Apri</button>
+                        <button className="underline mr-3" onClick={() => { /* duplicazione simulata */ }}>Duplica</button>
+                        <button className="underline text-red-400" onClick={() => deleteFromArchive(it.id)}>Elimina</button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

@@ -8,6 +8,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Route } from "./+types/layout";
 import { createClerkClient } from "@clerk/react-router/api.server";
 import { Outlet } from "react-router";
+import { ComparisonProvider } from "~/state/comparison";
 
 export async function loader(args: Route.LoaderArgs) {
   const { userId } = await getAuth(args);
@@ -48,7 +49,9 @@ export default function DashboardLayout() {
       <AppSidebar variant="inset" user={user} />
       <SidebarInset>
         <SiteHeader />
-        <Outlet />
+        <ComparisonProvider>
+          <Outlet />
+        </ComparisonProvider>
       </SidebarInset>
     </SidebarProvider>
   );

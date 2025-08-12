@@ -4,32 +4,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Button } from "~/components/ui/button";
 import { Separator } from "~/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
-
-type UploadedFile = {
-  id: string;
-  name: string;
-  size: number;
-  status: "caricato" | "in_coda" | "errore";
-};
+import { Input } from "~/components/ui/input";
+import { useComparison } from "~/state/comparison";
+import { Checkbox } from "~/components/ui/checkbox";
+import { Label } from "~/components/ui/label";
 
 export default function NewComparisonPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [files, setFiles] = useState<UploadedFile[]>([]);
-  const [hasResults, setHasResults] = useState(false);
+  const { state, addFiles, removeFile, startProcessing, regenerateTable, setFilters, setSort, exportCSV, copyKeynote, saveToArchive } = useComparison();
+  const [savingName, setSavingName] = useState("");
 
   const onSelectFiles = useCallback((list: FileList | null) => {
     if (!list) return;
-    const next: UploadedFile[] = Array.from(list).map((f) => ({
-      id: `${f.name}-${f.size}-${f.lastModified}`,
-      name: f.name,
-      size: f.size,
-      status: "caricato",
-    }));
-    setFiles((prev) => {
-      const existing = new Set(prev.map((p) => p.id));
-      return [...prev, ...next.filter((n) => !existing.has(n.id))];
-    });
-  }, []);
+    addFiles(list);
+  }, [addFiles]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -38,13 +26,12 @@ export default function NewComparisonPage() {
 
   const handleBrowse = useCallback(() => inputRef.current?.click(), []);
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => onSelectFiles(e.target.files), [onSelectFiles]);
-  const handleRemove = useCallback((id: string) => setFiles((prev) => prev.filter((f) => f.id !== id)), []);
+  const handleRemove = useCallback((id: string) => removeFile(id), [removeFile]);
 
-  const canStart = useMemo(() => files.length >= 2, [files.length]);
-  const startComparison = useCallback(() => {
-    // Solo frontend: mostriamo tabella placeholder coerente con front-end-structure.md
-    setHasResults(true);
-  }, []);
+  const canStart = useMemo(() => state.files.length >= 2, [state.files.length]);
+  const startSimulated = useCallback(() => {
+    void startProcessing();
+  }, [startProcessing]);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -67,7 +54,7 @@ export default function NewComparisonPage() {
                 <input ref={inputRef} type="file" multiple accept="application/pdf" className="hidden" onChange={handleInputChange} />
               </div>
 
-              {files.length > 0 && (
+              {state.files.length > 0 && (
                 <div className="mt-6">
                   <Table>
                     <TableHeader>
@@ -79,11 +66,11 @@ export default function NewComparisonPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {files.map((f) => (
+                      {state.files.map((f) => (
                         <TableRow key={f.id}>
                           <TableCell className="text-sm">{f.name}</TableCell>
                           <TableCell className="text-sm">{(f.size / 1024).toFixed(1)} KB</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{f.status}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">caricato</TableCell>
                           <TableCell>
                             <Button data-slot="button" variant="outline" size="sm" onClick={() => handleRemove(f.id)}>Rimuovi</Button>
                           </TableCell>
@@ -92,22 +79,50 @@ export default function NewComparisonPage() {
                     </TableBody>
                   </Table>
 
-                  <div className="mt-4 flex justify-end">
-                    <Button data-slot="button" onClick={startComparison} disabled={!canStart}>Avvia Confronto</Button>
+                  {/* Barra progressiva a step */}
+                  <div className="mt-4 grid grid-cols-3 gap-3">
+                    {[
+                      { label: "Estrazione", idx: 1 },
+                      { label: "Normalizzazione", idx: 2 },
+                      { label: "Generazione", idx: 3 },
+                    ].map((s) => (
+                      <div key={s.idx} className={`rounded-md border p-3 text-center ${state.processing.step >= s.idx && state.processing.running ? "bg-[rgba(11,30,39,0.5)]" : ""}`} data-slot="input">
+                        <div className="text-xs text-muted-foreground">{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 flex justify-end gap-2">
+                    <Button data-slot="button" variant="outline" onClick={regenerateTable} disabled={state.processing.running || state.files.length === 0}>Rigenera</Button>
+                    <Button data-slot="button" onClick={startSimulated} disabled={!canStart || state.processing.running}>Avvia Confronto</Button>
                   </div>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {hasResults && (
+          {state.hasResults && state.table && (
             <Card data-slot="card">
               <CardHeader>
                 <CardTitle className="text-base">Tabella Comparativa</CardTitle>
                 <CardDescription>Vista interattiva (placeholder)</CardDescription>
               </CardHeader>
               <CardContent>
-                <ComparisonTable fileNames={files.map((f) => f.name)} />
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <Button data-slot="button" variant="outline" size="sm" onClick={exportCSV}>Esporta CSV</Button>
+                    <Button data-slot="button" variant="outline" size="sm" onClick={copyKeynote}>Copia in Keynote</Button>
+                    <div className="flex items-center gap-2">
+                      <Input data-slot="input" value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder="Nome confronto" className="h-8 w-40" />
+                      <Button data-slot="button" size="sm" onClick={() => saveToArchive(savingName || "Confronto")}>Salva</Button>
+                    </div>
+                  </div>
+                  <FiltersQuick onChangeQuery={(q) => state.table && setFilters({ ...state.table.filters, query: q })} />
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-6">
+                  <ComparisonTable />
+                  <FiltersPanel />
+                </div>
               </CardContent>
             </Card>
           )}
@@ -117,35 +132,98 @@ export default function NewComparisonPage() {
   );
 }
 
-function ComparisonTable({ fileNames }: { fileNames: string[] }) {
-  const columns = ["Metrica", ...fileNames];
-  const rows = [
-    { key: "Feature A", values: ["Sì", "No", "Sì"] },
-    { key: "Feature B", values: ["Alto", "Medio", "Basso"] },
-    { key: "Supporto", values: ["Email", "Chat", "Email+Chat"] },
-  ];
+function FiltersQuick({ onChangeQuery }: { onChangeQuery: (q: string) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <Input data-slot="input" placeholder="Filtra metriche" className="h-8 w-48" onChange={(e) => onChangeQuery(e.target.value)} />
+    </div>
+  );
+}
+
+function ComparisonTable() {
+  const { state, setSort } = useComparison();
+  const table = state.table!;
+
+  const filteredRows = useMemo(() => {
+    let rows = table.rows;
+    const q = table.filters.query.trim().toLowerCase();
+    if (q) rows = rows.filter((r) => r.key.toLowerCase().includes(q));
+    // categorie: se presenti in filters.categories
+    const actives = Object.entries(table.filters.categories).filter(([, v]) => v).map(([k]) => k);
+    if (actives.length) rows = rows.filter((r) => actives.includes(r.category));
+    // ordinamento
+    if (table.sort) {
+      const { columnIndex, direction } = table.sort;
+      rows = [...rows].sort((a, b) => {
+        const av = columnIndex === 0 ? a.key : a.values[columnIndex - 1];
+        const bv = columnIndex === 0 ? b.key : b.values[columnIndex - 1];
+        const cmp = String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" });
+        return direction === "asc" ? cmp : -cmp;
+      });
+    }
+    return rows;
+  }, [table]);
+
+  const onSort = (idx: number) => {
+    const next = !table.sort || table.sort.columnIndex !== idx
+      ? { columnIndex: idx, direction: "asc" as const }
+      : { columnIndex: idx, direction: table.sort.direction === "asc" ? "desc" : "asc" };
+    setSort(next);
+  };
 
   return (
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
-            {columns.map((c) => (
-              <TableHead key={c}>{c}</TableHead>
+            {table.columns.map((c, i) => (
+              <TableHead key={c} onClick={() => onSort(i)} className="cursor-pointer select-none">
+                {c}
+                {table.sort?.columnIndex === i && (
+                  <span className="ml-1 text-xs text-muted-foreground">{table.sort.direction === "asc" ? "▲" : "▼"}</span>
+                )}
+              </TableHead>
             ))}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r) => (
+          {filteredRows.map((r) => (
             <TableRow key={r.key}>
               <TableCell className="font-medium">{r.key}</TableCell>
-              {r.values.slice(0, fileNames.length).map((v, i) => (
-                <TableCell key={i}>{v}</TableCell>
+              {r.values.map((v, i) => (
+                <TableCell key={i}>{renderCell(v)}</TableCell>
               ))}
             </TableRow>
           ))}
         </TableBody>
       </Table>
+    </div>
+  );
+}
+
+function renderCell(v: string | number | boolean | null) {
+  if (v === null || v === undefined) return <span className="text-muted-foreground">—</span>;
+  if (typeof v === "boolean") return <span className="text-xs" data-slot="badge">{v ? "Vero" : "Falso"}</span>;
+  if (typeof v === "number") return <span>{v}</span>;
+  return <span>{v}</span>;
+}
+
+function FiltersPanel() {
+  const { state, setFilters } = useComparison();
+  const filters = state.table!.filters;
+  const toggle = (key: string) => setFilters({ ...filters, categories: { ...filters.categories, [key]: !filters.categories[key] } });
+  return (
+    <div className="rounded-md border p-3" data-slot="input">
+      <div className="text-sm font-medium mb-2">Filtri</div>
+      {Object.keys(filters.categories).map((k) => (
+        <label key={k} className="flex items-center gap-2 py-1">
+          <Checkbox checked={!!filters.categories[k]} onCheckedChange={() => toggle(k)} id={`cat-${k}`} />
+          <Label htmlFor={`cat-${k}`} className="text-sm">{k}</Label>
+        </label>
+      ))}
+      <div className="mt-3 text-right text-xs text-muted-foreground">
+        <button className="underline" onClick={() => setFilters({ ...filters, categories: Object.fromEntries(Object.keys(filters.categories).map((k) => [k, true])) })}>Reset</button>
+      </div>
     </div>
   );
 }
