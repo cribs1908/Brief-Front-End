@@ -5,7 +5,7 @@ import { Button } from "~/components/ui/button";
 import { Separator } from "~/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Input } from "~/components/ui/input";
-import { useComparison, isMinBetter } from "~/state/comparison";
+import { useComparison, isMinBetter, compareCells, isRedFlagRow, isSignificantRow } from "~/state/comparison";
 import { Checkbox } from "~/components/ui/checkbox";
 import { Label } from "~/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "~/components/ui/tooltip";
@@ -301,25 +301,6 @@ function MetricInfo({ keyName }: { keyName: string }) {
 
 // Helpers condivisi lato UI (mock-only)
 import { type ComparisonTable as T } from "~/state/comparison";
-function isMinBetter(key: string) {
-  return key === "Monthly Price ($)" || key === "Support Response (hrs)";
-}
-function compareCells(a: T["rows"][number], b: T["rows"][number], columnIndex: number, direction: "asc" | "desc") {
-  const av = columnIndex === 0 ? a.key : a.values[columnIndex - 1];
-  const bv = columnIndex === 0 ? b.key : b.values[columnIndex - 1];
-  // boolean -> true first; numeric -> numeric compare; text -> localeCompare
-  let cmp = 0;
-  if (typeof av === "boolean" && typeof bv === "boolean") cmp = (av === bv ? 0 : av ? -1 : 1);
-  else if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
-  else cmp = String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: "base" });
-  return direction === "asc" ? cmp : -cmp;
-}
-function isRedFlagRow(r: T["rows"][number]) {
-  if (r.key === "SOC2" || r.key === "GDPR") return r.values.some((v) => v === false);
-  if (r.key === "Support Response (hrs)") return r.values.some((v) => typeof v === "number" && v > 24);
-  if (r.key === "Uptime SLA (%)") return r.values.some((v) => typeof v === "number" && v < 99.9);
-  return false;
-}
 function getVisibleRowsForUI(table: T) {
   const activeCats = Object.entries(table.filters.categories).filter(([, v]) => v).map(([k]) => k);
   let rows = table.rows.filter((r) => activeCats.includes(r.category));
@@ -330,7 +311,7 @@ function getVisibleRowsForUI(table: T) {
   }
   if (table.filters.showSignificantOnly) {
     const thr = Math.max(0, table.filters.significancePercent) / 100;
-    rows = rows.filter((r) => isSignificantRowUI(r, thr));
+    rows = rows.filter((r) => isSignificantRow(r, thr));
   }
   if (table.filters.showRedFlagsOnly) rows = rows.filter(isRedFlagRow);
   if (table.filters.showPinnedOnly && table.pinnedKeys.length) rows = rows.filter((r) => table.pinnedKeys.includes(r.key));
@@ -340,15 +321,5 @@ function getVisibleRowsForUI(table: T) {
     rows = rows.sort((a, b) => (order.has(a.key) || order.has(b.key) ? (order.get(a.key) ?? 1e9) - (order.get(b.key) ?? 1e9) : 0));
   }
   return rows;
-}
-function isSignificantRowUI(r: T["rows"][number], thr: number) {
-  if (r.type !== "numeric") return true;
-  const nums = r.values.filter((v): v is number => typeof v === "number");
-  if (nums.length < 2) return false;
-  const max = Math.max(...nums);
-  const min = Math.min(...nums);
-  if (max === 0 && min === 0) return false;
-  const ratio = isMinBetter(r.key) ? (max - min) / max : (max - min) / min;
-  return ratio >= thr;
 }
 
