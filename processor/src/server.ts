@@ -6,7 +6,8 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createWriteStream, promises as fs } from "node:fs";
 import { join } from "node:path";
-import * as pdfjsLib from "pdfjs-dist";
+// Usa la build legacy di PDF.js per compatibilità Node 18/20 (evita Promise.withResolvers di Node 22)
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { request } from "undici";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -183,6 +184,8 @@ app.post("/extract", async (req, res) => {
     tmp = tmpPath;
 
     const pdfBuf = await fs.readFile(tmpPath);
+    // Disabilita il worker in ambiente Node
+    try { ((pdfjsLib as any).GlobalWorkerOptions ||= {}).workerSrc = undefined; } catch {}
     const loadingTask = (pdfjsLib as any).getDocument({ data: pdfBuf });
     const doc = await loadingTask.promise;
     const pages = doc.numPages || 0;
