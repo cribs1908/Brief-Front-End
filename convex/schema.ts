@@ -42,4 +42,91 @@ export default defineSchema({
     .index("polarEventId", ["polarEventId"]),
 
   // Rimosse tabelle legacy (oauthStates, clients, integrations, reports, automations, logs)
+
+  // --- Pipeline core (vedi back-end.md) ---
+  documents: defineTable({
+    jobId: v.id("comparisonJobs"),
+    vendorName: v.optional(v.string()),
+    sourceUri: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+    ingestedAt: v.number(),
+    docType: v.optional(v.string()),
+    pages: v.optional(v.number()),
+    ocrUsed: v.optional(v.boolean()),
+  }).index("by_job", ["jobId"]),
+
+  extractionJobs: defineTable({
+    jobId: v.id("comparisonJobs"),
+    documentId: v.id("documents"),
+    vendorName: v.optional(v.string()),
+    status: v.string(), // pending|extracting|normalized|failed
+    error: v.optional(v.string()),
+    qualityScore: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_job", ["jobId"])
+    .index("by_document", ["documentId"]),
+
+  comparisonJobs: defineTable({
+    name: v.optional(v.string()),
+    status: v.string(), // queued|extracting|normalizing|aggregating|ready|ready_partial|failed|failed_no_signal
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    progress: v.optional(v.object({
+      total: v.number(),
+      completed: v.number(),
+      stage: v.string(),
+    })),
+    synonymMapVersion: v.optional(v.string()),
+  }),
+
+  rawExtractions: defineTable({
+    documentId: v.id("documents"),
+    tables: v.optional(v.any()),
+    textBlocks: v.optional(v.any()),
+    extractionQuality: v.optional(v.number()),
+    pageRefs: v.optional(v.any()),
+    createdAt: v.number(),
+  }).index("by_document", ["documentId"]),
+
+  normalizedMetrics: defineTable({
+    documentId: v.id("documents"),
+    metrics: v.any(), // Array<{metricId, metricLabel, value, unit, confidence, sourceRef, normalizationVersion}>
+    createdAt: v.number(),
+  }).index("by_document", ["documentId"]),
+
+  comparisonArtifacts: defineTable({
+    jobId: v.id("comparisonJobs"),
+    type: v.string(), // comparisonDataset | rawExtraction | normalizedMetrics | log
+    storageId: v.optional(v.id("_storage")),
+    data: v.optional(v.any()),
+    createdAt: v.number(),
+  }).index("by_job", ["jobId"]),
+
+  synonymMaps: defineTable({
+    version: v.string(),
+    active: v.boolean(),
+    entries: v.array(v.object({
+      canonicalMetricId: v.string(),
+      metricLabel: v.string(),
+      synonyms: v.array(v.string()),
+      unitRules: v.optional(v.any()),
+      priority: v.optional(v.number()),
+      optimality: v.optional(v.string()), // max|min
+    })),
+    lastUpdated: v.number(),
+  }).index("by_version", ["version"]).index("by_active", ["active"]),
+
+  proposedSynonyms: defineTable({
+    labelRaw: v.string(),
+    context: v.optional(v.string()),
+    suggestedMetricId: v.optional(v.string()),
+    confidence: v.number(),
+    vendorName: v.optional(v.string()),
+    jobId: v.optional(v.id("comparisonJobs")),
+    documentId: v.optional(v.id("documents")),
+    status: v.string(), // proposed|approved|rejected
+    createdAt: v.number(),
+  }).index("by_status", ["status"]).index("by_job", ["jobId"]),
 });
