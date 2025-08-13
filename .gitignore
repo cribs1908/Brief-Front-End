@@ -5,4 +5,10 @@
 /.react-router/
 /build/
 
+# Processor service artifacts
+/processor/dist/
+/processor/node_modules/
+/processor/*.log
+/processor/.env*
+
 .env.local

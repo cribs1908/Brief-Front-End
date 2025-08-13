@@ -1,0 +1,27 @@
+{
+  "name": "processor-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "pdfjs-dist": "^4.10.38",
+    "undici": "^6.19.8",
+    "zod": "^3.25.39"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20",
+    "tsx": "^4.16.2",
+    "typescript": "^5.8.3"
+  }
+}
+
+
