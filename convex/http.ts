@@ -215,6 +215,51 @@ http.route({
   }),
 });
 
+// Storage upload URL for client-side PDF uploads
+http.route({
+  path: "/api/storage/upload-url",
+  method: "GET",
+  handler: httpAction(async (ctx, _req) => {
+    const url = await ctx.storage.generateUploadUrl();
+    return new Response(JSON.stringify({ url }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": process.env.FRONTEND_URL || "http://localhost:5173",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Credentials": "true",
+        Vary: "origin",
+      },
+    });
+  }),
+});
+
+http.route({
+  path: "/api/storage/upload-url",
+  method: "OPTIONS",
+  handler: httpAction(async (_ctx, request) => {
+    const headers = request.headers;
+    if (
+      headers.get("Origin") !== null &&
+      headers.get("Access-Control-Request-Method") !== null &&
+      headers.get("Access-Control-Request-Headers") !== null
+    ) {
+      return new Response(null, {
+        headers: new Headers({
+          "Access-Control-Allow-Origin": process.env.FRONTEND_URL || "http://localhost:5173",
+          "Access-Control-Allow-Methods": "GET",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "Access-Control-Allow-Credentials": "true",
+          "Access-Control-Max-Age": "86400",
+        }),
+      });
+    } else {
+      return new Response();
+    }
+  }),
+});
+
 // Synonym endpoints
 http.route({
   path: "/api/synonyms/propose",

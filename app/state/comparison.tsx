@@ -191,6 +191,60 @@ function buildMockTable(files: ComparisonFile[], synonyms: SynonymsMap): Compari
   return { columns, vendorMeta, rows, sort: null, filters: defaultFilters, pinnedKeys: [] };
 }
 
+// --- Backend integration (Convex HTTP) ---
+const API_BASE: string = (import.meta as any).env?.VITE_CONVEX_URL || "";
+
+async function getUploadUrl(): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/storage/upload-url`);
+  if (!res.ok) throw new Error("Upload URL non disponibile");
+  const data = await res.json();
+  return data.url as string;
+}
+
+async function uploadPdfToStorage(file: File): Promise<string> {
+  const url = await getUploadUrl();
+  const up = await fetch(url, { method: "POST", body: file });
+  if (!up.ok) throw new Error("Upload fallito");
+  const json = await up.json();
+  if (!json.storageId) throw new Error("storageId mancante");
+  return json.storageId as string;
+}
+
+type BackendDataset = {
+  vendors: { id: string; name: string }[];
+  metrics: { metric_id: string; label: string; optimality?: "max" | "min" }[];
+  matrix: Record<string, Record<string, any>>;
+  deltas: Record<string, number | null>;
+  best_vendor_by_metric: Record<string, string | null>;
+  missing_flags: Record<string, Record<string, boolean>>;
+  synonym_map_version?: string;
+};
+
+function buildTableFromDataset(ds: BackendDataset): ComparisonTable {
+  const vendorOrder = ds.vendors.map((v) => v.id);
+  const columns = ["Metrica", ...ds.vendors.map((v) => v.name)];
+  const vendorMeta = ds.vendors.map((v) => ({ vendor: v.name, source: v.name, docId: v.id, dateParsed: Date.now() }));
+  const rows = ds.metrics.map((m) => {
+    const values = vendorOrder.map((vid) => {
+      const cell = ds.matrix?.[m.metric_id]?.[vid] ?? null;
+      if (!cell) return null;
+      const val = cell.value_normalized ?? cell.value ?? null;
+      const unit = cell.unit_normalized ?? cell.unit ?? undefined;
+      if (typeof val === "number") return val;
+      if (typeof val === "boolean") return val;
+      if (val === null) return null;
+      return unit ? `${val} ${unit}` : String(val);
+    });
+    const type: "numeric" | "boolean" | "text" = values.every((v) => typeof v === "number" || v === null)
+      ? "numeric"
+      : values.every((v) => typeof v === "boolean" || v === null)
+      ? "boolean"
+      : "text";
+    return { key: m.label, category: "Performance", type, values };
+  });
+  return { columns, vendorMeta, rows, sort: null, filters: defaultFilters, pinnedKeys: [] };
+}
+
 type Ctx = {
   state: State;
   addFiles: (files: FileList | File[]) => void;
@@ -226,16 +280,26 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
   });
   const [state, dispatch] = useReducer(reducer, persisted);
 
+  // In-memory cache dei File caricati (non persistito)
+  const filesDataRef = React.useRef<Map<string, File>>(new Map());
+
   // persist
   React.useEffect(() => setPersisted(state), [state, setPersisted]);
 
   const addFiles = useCallback((input: FileList | File[]) => {
     const list = Array.from(input as any as File[]);
-    const next = list.map((f) => ({ id: `${f.name}-${f.size}-${f.lastModified}`, name: f.name, size: f.size }));
+    const next = list.map((f) => {
+      const id = `${f.name}-${f.size}-${f.lastModified}`;
+      filesDataRef.current.set(id, f);
+      return { id, name: f.name, size: f.size } as ComparisonFile;
+    });
     dispatch({ type: "ADD_FILES", files: next });
   }, []);
 
-  const removeFile = useCallback((id: string) => dispatch({ type: "REMOVE_FILE", id }), []);
+  const removeFile = useCallback((id: string) => {
+    filesDataRef.current.delete(id);
+    dispatch({ type: "REMOVE_FILE", id });
+  }, []);
 
   const renameVendor = useCallback((fileId: string, vendorName: string) => {
     const nextFiles = state.files.map((f) => (f.id === fileId ? { ...f, vendorName } : f));
@@ -257,15 +321,55 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
 
   const startProcessing = useCallback(async () => {
     if (state.files.length < 2) return;
-    dispatch({ type: "SET_PROCESSING", processing: { step: 1, running: true } });
-    await new Promise((r) => setTimeout(r, 700)); // Estrazione
-    dispatch({ type: "SET_PROCESSING", processing: { step: 2, running: true } });
-    await new Promise((r) => setTimeout(r, 700)); // Normalizzazione
-    dispatch({ type: "SET_PROCESSING", processing: { step: 3, running: true } });
-    await new Promise((r) => setTimeout(r, 700)); // Generazione tabella
-    regenerateTable();
-    dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
-  }, [regenerateTable, state.files.length]);
+    try {
+      dispatch({ type: "SET_PROCESSING", processing: { step: 1, running: true } });
+      // Upload PDF → storageId
+      const items = await Promise.all(state.files.map(async (meta) => {
+        const file = filesDataRef.current.get(meta.id);
+        if (!file) throw new Error(`File mancante per ${meta.name}`);
+        const storageId = await uploadPdfToStorage(file);
+        const vendor_hint = meta.vendorName?.trim() || meta.name.replace(/\.pdf$/i, "");
+        return { storageId, vendor_hint };
+      }));
+
+      // Create job
+      const res = await fetch(`${API_BASE}/api/jobs/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdf_list: items, job_name: "Confronto" }),
+      });
+      if (!res.ok) throw new Error("Creazione job fallita");
+      const { job_id } = await res.json();
+
+      // Poll status
+      let status = "queued";
+      let tries = 0;
+      while (!["ready", "ready_partial", "failed", "failed_no_signal"].includes(status) && tries < 300) {
+        const s = await fetch(`${API_BASE}/api/jobs/status?jobId=${encodeURIComponent(job_id)}`);
+        if (!s.ok) throw new Error("Status non disponibile");
+        const js = await s.json();
+        status = js?.job?.status || status;
+        const stage = js?.job?.progress?.stage as string | undefined;
+        const step = stage === "aggregating" ? 3 : stage === "extracting" ? 1 : 2;
+        dispatch({ type: "SET_PROCESSING", processing: { step, running: true } });
+        if (["ready", "ready_partial"].includes(status)) break;
+        await new Promise((r) => setTimeout(r, 1500));
+        tries++;
+      }
+
+      // Fetch dataset
+      const d = await fetch(`${API_BASE}/api/jobs/dataset?jobId=${encodeURIComponent(job_id)}`);
+      if (!d.ok) throw new Error("Dataset non disponibile");
+      const dataset: BackendDataset = await d.json();
+      const table = buildTableFromDataset(dataset);
+      dispatch({ type: "SET_TABLE", table });
+      dispatch({ type: "SET_RESULTS", has: true });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
+    }
+  }, [state.files]);
 
   const setSort = useCallback((sort: SortState) => dispatch({ type: "SET_TABLE_SORT", sort }), []);
   const setFilters = useCallback((filters: FiltersState) => dispatch({ type: "SET_TABLE_FILTERS", filters }), []);

@@ -133,7 +133,13 @@ export const seedSynonymMapV1 = mutation({
 
 export const createComparisonJob = mutation({
   args: {
-    pdf_list: v.array(v.object({ uri: v.string(), vendor_hint: v.optional(v.string()) })),
+    pdf_list: v.array(
+      v.object({
+        uri: v.optional(v.string()),
+        storageId: v.optional(v.id("_storage")),
+        vendor_hint: v.optional(v.string()),
+      })
+    ),
     job_name: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -150,12 +156,18 @@ export const createComparisonJob = mutation({
     });
 
     // Create documents + extractionJobs
-    for (const spec of args.pdf_list as PdfSpec[]) {
+    for (const spec of args.pdf_list as any[]) {
+      // Resolve URI: prefer provided uri, otherwise generate from storageId
+      let resolvedUri: string | undefined = spec.uri;
+      if (!resolvedUri && spec.storageId) {
+        const tmpUrl = await ctx.storage.getUrl(spec.storageId);
+        resolvedUri = tmpUrl ?? undefined;
+      }
       const docId = await ctx.db.insert("documents", {
         jobId: jobId as Id<"comparisonJobs">,
         vendorName: spec.vendor_hint || undefined,
-        sourceUri: spec.uri,
-        storageId: undefined,
+        sourceUri: resolvedUri,
+        storageId: spec.storageId,
         ingestedAt: now(),
         docType: undefined,
         pages: undefined,
