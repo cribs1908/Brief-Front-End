@@ -172,11 +172,11 @@
 }
 [data-slot="toolbar-sticky"] {
   position: sticky;
-  top: calc(var(--header-height) + 8px);
+  top: calc(var(--header-height) + 4px);
   z-index: 30;
-  background-color: color-mix(in oklab, var(--background), transparent 0%);
-  backdrop-filter: blur(6px) saturate(115%);
-  -webkit-backdrop-filter: blur(6px) saturate(115%);
+  background-color: transparent;
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
 }
 [data-slot="card"]:hover {
   transform: translateY(-1px);

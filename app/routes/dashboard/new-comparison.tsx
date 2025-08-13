@@ -13,6 +13,8 @@ import { Badge } from "~/components/ui/badge";
 import { Link } from "react-router";
 import { useLocalStorage } from "~/hooks/use-local-storage";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "~/components/ui/sheet";
+import { IconTrash } from "@tabler/icons-react";
+import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 
 function ExecutiveSummary() {
   const { state } = useComparison();
@@ -67,7 +69,6 @@ function ExecutiveSummary() {
         <div className="text-sm text-muted-foreground">
           {sentence1} {sentence2}
         </div>
-        <Button data-slot="button" size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(`${sentence1} ${sentence2}`)}>Copia sintesi</Button>
       </div>
     </div>
   );
@@ -136,7 +137,7 @@ export default function NewComparisonPage() {
                     </TableHeader>
                     <TableBody>
                       {state.files.map((f) => (
-                        <TableRow key={f.id}>
+                        <TableRow key={f.id} className="transition-colors hover:bg-[rgba(11,30,39,0.5)]">
                           <TableCell className="text-sm">{f.name}</TableCell>
                           <TableCell>
                             <Input data-slot="input" className="h-8" defaultValue={f.vendorName || f.name.replace(/\.pdf$/i, "")} onBlur={(e) => renameVendor(f.id, e.target.value)} />
@@ -144,7 +145,16 @@ export default function NewComparisonPage() {
                           <TableCell className="text-sm">{(f.size / 1024).toFixed(1)} KB</TableCell>
                           <TableCell className="text-xs text-muted-foreground">caricato</TableCell>
                           <TableCell>
-                            <Button data-slot="button" variant="outline" size="sm" onClick={() => handleRemove(f.id)}>Rimuovi</Button>
+                            <Button
+                              data-slot="button"
+                              variant="outline"
+                              size="sm"
+                              aria-label="Rimuovi file"
+                              className="border-destructive/50 text-destructive hover:bg-destructive/20"
+                              onClick={() => handleRemove(f.id)}
+                            >
+                              <IconTrash size={16} />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -172,12 +182,6 @@ export default function NewComparisonPage() {
                         );
                       })}
                       <div className="ml-auto flex items-center gap-2">
-                        {!state.processing.running && state.files.length > 0 && (
-                          <>
-                            <Button data-slot="button" size="sm" variant="outline" onClick={startSimulated}>Riprova</Button>
-                            <Button data-slot="button" size="sm" variant="outline" onClick={() => handleRemove(state.files[0].id)}>Rimuovi file problematico</Button>
-                          </>
-                        )}
                         {state.processing.running && <Badge variant="secondary">in corso</Badge>}
                         {!state.processing.running && state.hasResults && <Badge>completato</Badge>}
                       </div>
@@ -202,7 +206,7 @@ export default function NewComparisonPage() {
                 </CardHeader>
                 <CardContent>
                   {/* Toolbar sticky dentro la card */}
-                  <div data-slot="toolbar-sticky" className="mb-3">
+                  <div data-slot="toolbar-sticky" className="mb-3 mt-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <Button data-slot="button" variant="outline" size="sm" onClick={exportCSV}>Esporta CSV</Button>
                       <Button data-slot="button" variant="outline" size="sm" onClick={copyKeynote}>Copia in Keynote</Button>
@@ -214,24 +218,20 @@ export default function NewComparisonPage() {
                           <button className="underline" onClick={() => navigator.clipboard.writeText(window.location.href)}>Condividi link interno</button>
                         </div>
                       )}
-                      <div className="ml-auto min-w-[180px]">
-                        <div className="flex items-center gap-2">
-                          <Input data-slot="input" placeholder="Filtra metriche" className="h-8 w-full" onChange={(e) => state.table && setFilters({ ...state.table.filters, query: e.target.value })} />
-                          <Sheet open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
-                            <SheetTrigger asChild>
-                              <Button data-slot="button" variant="outline" size="sm">Filtra metriche</Button>
-                            </SheetTrigger>
-                            <SheetContent side="right" className="w-full sm:max-w-md">
-                              <SheetHeader>
-                                <SheetTitle>Filtri</SheetTitle>
-                              </SheetHeader>
-                              <div className="p-4 space-y-4 overflow-y-auto">
-                                <ActiveFiltersChipsFallback />
-                                <FiltersPanel />
-                              </div>
-                            </SheetContent>
-                          </Sheet>
-                        </div>
+                      <div className="ml-auto">
+                        <Sheet open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
+                          <SheetTrigger asChild>
+                            <Button data-slot="button" variant="outline" size="sm">Filtra metriche</Button>
+                          </SheetTrigger>
+                          <SheetContent side="right" className="w-full sm:max-w-md">
+                            <SheetHeader>
+                              <SheetTitle>Filtri</SheetTitle>
+                            </SheetHeader>
+                            <div className="p-4 space-y-4 overflow-y-auto">
+                              <FiltersPanel />
+                            </div>
+                          </SheetContent>
+                        </Sheet>
                       </div>
                     </div>
                   </div>
@@ -354,7 +354,9 @@ function ComparisonTable({ collapsedGroups, setCollapsedGroups }: { collapsedGro
             <>
               <TableRow key={`h-${cat}`}>
                 <TableCell colSpan={table.columns.length}>
-                  <button className="text-xs underline mr-2" onClick={() => toggleGroup(cat)}>{collapsedGroups[cat] ? "Apri" : "Chiudi"}</button>
+                  <button className="mr-2 inline-flex items-center" onClick={() => toggleGroup(cat)} aria-label="Apri/Chiudi gruppo">
+                    <span className={`inline-block transition-transform ${collapsedGroups[cat] ? "rotate-[-90deg]" : "rotate-0"}`}>▶</span>
+                  </button>
                   <span className="text-xs uppercase tracking-wide text-muted-foreground align-middle">{cat}</span>
                 </TableCell>
               </TableRow>
