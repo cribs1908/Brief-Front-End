@@ -1,12 +1,14 @@
 FROM node:20-alpine AS development-dependencies-env
 COPY . /app
 WORKDIR /app
-RUN npm ci
+# Aggiorna npm per compatibilità lockfile
+RUN npm install -g npm@11.5.2 && npm ci
 
 FROM node:20-alpine AS production-dependencies-env
 COPY ./package.json package-lock.json /app/
 WORKDIR /app
-RUN npm ci --omit=dev
+# Aggiorna npm per compatibilità lockfile e install prod deps
+RUN npm install -g npm@11.5.2 && npm ci --omit=dev
 
 FROM node:20-alpine AS build-env
 COPY . /app/
