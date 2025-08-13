@@ -61,7 +61,7 @@ function ExecutiveSummary() {
   const sentence2 = cheaper ? `${cheaper.vendor} ha costo inferiore del ${cheaper.diff}% rispetto al più caro; verifica SLA e supporto.` : `Valuta trade-off tra prezzo e SLA rispetto alle priorità.`;
 
   return (
-    <div className="rounded-md border p-3 mb-3 sticky top-[calc(var(--header-height)+8px)] bg-[--background] z-20" data-slot="input">
+    <div className="rounded-md border p-3 mb-3" data-slot="input">
       <div className="flex items-start justify-between gap-3">
         <div className="text-sm text-muted-foreground">
           {sentence1} {sentence2}
@@ -149,30 +149,37 @@ export default function NewComparisonPage() {
                     </TableBody>
                   </Table>
 
-                  {/* Stepper lineare */}
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    {[
-                      { label: "Estrazione", idx: 1 },
-                      { label: "Normalizzazione", idx: 2 },
-                      { label: "Generazione tabella", idx: 3 },
-                    ].map((s) => {
-                      const isActive = state.processing.running && state.processing.step === s.idx;
-                      const isDone = !state.processing.running && state.processing.step === 0;
-                      return (
-                        <div key={s.idx} className="rounded-md border p-3" data-slot="input">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-muted-foreground">{s.label}</span>
-                            {isActive ? <Badge variant="secondary">in corso</Badge> : isDone ? <Badge>completato</Badge> : <Badge variant="outline">in attesa</Badge>}
-                          </div>
-                          {!state.processing.running && state.files.length && (
-                            <div className="mt-2 flex gap-2 justify-end">
-                              <Button data-slot="button" size="sm" variant="outline" onClick={startSimulated}>Riprova</Button>
-                              <Button data-slot="button" size="sm" variant="outline" onClick={() => handleRemove(state.files[0].id)}>Rimuovi file problematico</Button>
+                  {/* Stepper lineare pulito */}
+                  <div className="mt-4">
+                    <div className="flex items-center gap-3">
+                      {[
+                        { label: "Estrazione", idx: 1 },
+                        { label: "Normalizzazione", idx: 2 },
+                        { label: "Generazione", idx: 3 },
+                      ].map((s, i, arr) => {
+                        const isActive = state.processing.running && state.processing.step === s.idx;
+                        const isDone = !state.processing.running && state.hasResults;
+                        return (
+                          <div key={s.idx} className="flex items-center gap-3">
+                            <div className={`size-7 rounded-full border flex items-center justify-center text-[11px] ${isActive ? "bg-[rgba(11,30,39,0.5)]" : ""}`} data-slot="input">
+                              {s.idx}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                            <div className="text-xs text-muted-foreground min-w-24">{s.label}</div>
+                            {i < arr.length - 1 && <div className="h-px w-10 bg-[rgba(12,18,26,0.9)]" />}
+                          </div>
+                        );
+                      })}
+                      <div className="ml-auto flex items-center gap-2">
+                        {!state.processing.running && state.files.length > 0 && (
+                          <>
+                            <Button data-slot="button" size="sm" variant="outline" onClick={startSimulated}>Riprova</Button>
+                            <Button data-slot="button" size="sm" variant="outline" onClick={() => handleRemove(state.files[0].id)}>Rimuovi file problematico</Button>
+                          </>
+                        )}
+                        {state.processing.running && <Badge variant="secondary">in corso</Badge>}
+                        {!state.processing.running && state.hasResults && <Badge>completato</Badge>}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="mt-4 flex justify-end gap-2">
@@ -185,49 +192,62 @@ export default function NewComparisonPage() {
           </Card>
 
           {state.hasResults && state.table && (
-            <Card data-slot="card">
-              <CardHeader>
-                <CardTitle className="text-base">Confronto Fornitori</CardTitle>
-                <CardDescription>Filtra, evidenzia e esporta</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {/* Azioni rapide sticky */}
-                <div className="flex items-center justify-between gap-3 mb-2 sticky top-[calc(var(--header-height)+8px)] bg-[--background] z-30 py-2">
-                  <div className="flex items-center gap-2">
-                    <Button data-slot="button" variant="outline" size="sm" onClick={exportCSV}>Esporta CSV</Button>
-                    <Button data-slot="button" variant="outline" size="sm" onClick={copyKeynote}>Copia in Keynote</Button>
+            <>
+              <Card data-slot="card">
+                <CardHeader>
+                  <CardTitle className="text-base">Confronto Fornitori</CardTitle>
+                  <CardDescription>Filtra, evidenzia e esporta</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {/* Barra azioni (non sticky per evitare overlay) */}
+                  <div className="flex items-center justify-between gap-3 mb-3">
                     <div className="flex items-center gap-2">
-                      <Input data-slot="input" value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder="Nome confronto" className="h-8 w-40" />
-                      <Button data-slot="button" size="sm" onClick={() => { saveToArchive(savingName || "Confronto"); setJustSaved(true); }}>Salva</Button>
-                      {justSaved && (
-                        <div className="flex items-center gap-2 text-xs">
-                          <Link to="/dashboard/archive" className="underline">Apri in Archivio</Link>
-                          <button className="underline" onClick={() => navigator.clipboard.writeText(window.location.href)}>Condividi link interno</button>
-                        </div>
-                      )}
+                      <Button data-slot="button" variant="outline" size="sm" onClick={exportCSV}>Esporta CSV</Button>
+                      <Button data-slot="button" variant="outline" size="sm" onClick={copyKeynote}>Copia in Keynote</Button>
+                      <div className="flex items-center gap-2">
+                        <Input data-slot="input" value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder="Nome confronto" className="h-8 w-40" />
+                        <Button data-slot="button" size="sm" onClick={() => { saveToArchive(savingName || "Confronto"); setJustSaved(true); }}>Salva</Button>
+                        {justSaved && (
+                          <div className="flex items-center gap-2 text-xs">
+                            <Link to="/dashboard/archive" className="underline">Apri in Archivio</Link>
+                            <button className="underline" onClick={() => navigator.clipboard.writeText(window.location.href)}>Condividi link interno</button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <FiltersQuick onChangeQuery={(q) => state.table && setFilters({ ...state.table.filters, query: q })} />
-                </div>
-
-                <ExecutiveSummary />
-
-                {/* Layout a 3 colonne: sinistra controlli, centro tabella, destra insight */}
-                <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr_320px] gap-6">
-                  {/* Colonna sinistra: controlli e filtri */}
-                  <LeftControls />
-
-                  {/* Colonna centrale: header fornitori + tabella */}
-                  <div className="min-w-0">
-                    <VendorsHeader />
-                    <ComparisonTableWrapper />
+                    <FiltersQuick onChangeQuery={(q) => state.table && setFilters({ ...state.table.filters, query: q })} />
                   </div>
 
-                  {/* Colonna destra: insight e note */}
+                  <ExecutiveSummary />
+
+                  {/* Contenuti principali: header vendor + tabella */}
+                  <VendorsHeader />
+                  <ComparisonTableWrapper />
+                </CardContent>
+              </Card>
+
+              {/* Sezione Filtri separata (evita overlay con tabella) */}
+              <Card data-slot="card" id="filters">
+                <CardHeader>
+                  <CardTitle className="text-base">Filtri</CardTitle>
+                  <CardDescription>Restringi i risultati senza alterare il layout</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <FiltersPanel />
+                </CardContent>
+              </Card>
+
+              {/* Sezione Insight e Note separata */}
+              <Card data-slot="card">
+                <CardHeader>
+                  <CardTitle className="text-base">Insight e Note</CardTitle>
+                  <CardDescription>Riepiloghi, differenze e annotazioni</CardDescription>
+                </CardHeader>
+                <CardContent>
                   <InsightsPanel notes={notes} setNotes={setNotes} />
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </>
           )}
         </div>
       </div>
@@ -288,6 +308,13 @@ function ComparisonTable({ collapsedGroups, setCollapsedGroups }: { collapsedGro
           </TableRow>
         </TableHeader>
         <TableBody>
+          {filteredRows.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={table.columns.length} className="text-center text-xs text-muted-foreground py-10">
+                Nessun risultato per i criteri selezionati
+              </TableCell>
+            </TableRow>
+          )}
           {pinnedRows.length > 0 && (
             <>
               <TableRow>
@@ -516,7 +543,7 @@ function VendorsHeader() {
   const price = state.table!.rows.find((r) => r.key === "Monthly Price ($)");
   const redCounts = redFlagCountPerVendor(state.table!);
   return (
-    <div className="sticky top-[calc(var(--header-height)+56px)] z-10 bg-[--background] py-2 mb-2">
+    <div className="sticky top-[calc(var(--header-height)+8px)] z-10 bg-[--background] py-2 mb-2">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
         {vendors.map((v, i) => (
           <div key={v.vendor} className="rounded-md border p-3" data-slot="input">
