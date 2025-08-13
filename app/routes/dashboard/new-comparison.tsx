@@ -206,7 +206,7 @@ export default function NewComparisonPage() {
                   </div>
 
                   <div className="mt-4 flex justify-end gap-2">
-                    <Button data-slot="button" variant="outline" onClick={regenerateTable} disabled={state.processing.running || state.files.length === 0}>Rigenera</Button>
+                    <Button data-slot="button" variant="outline" onClick={regenerateTable} disabled={state.processing.running || state.files.length === 0}>Rigenera (mock off)</Button>
                     <Button data-slot="button" onClick={startSimulated} disabled={!canStart || state.processing.running}>Avvia Confronto</Button>
                   </div>
                 </div>

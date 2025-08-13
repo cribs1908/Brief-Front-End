@@ -193,6 +193,7 @@ function buildMockTable(files: ComparisonFile[], synonyms: SynonymsMap): Compari
 
 // --- Backend integration (Convex HTTP) ---
 const API_BASE: string = (import.meta as any).env?.VITE_CONVEX_URL || "";
+const DISABLE_MOCKS: boolean = ((import.meta as any).env?.VITE_DISABLE_MOCKS || "true").toString() === "true";
 
 async function getUploadUrl(): Promise<string> {
   const res = await fetch(`${API_BASE}/api/storage/upload-url`);
@@ -303,17 +304,19 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
 
   const renameVendor = useCallback((fileId: string, vendorName: string) => {
     const nextFiles = state.files.map((f) => (f.id === fileId ? { ...f, vendorName } : f));
-    // Aggiorna files e rigenera tabella per riflettere i nuovi nomi vendor
-    // Nota: essendo mock, rigeneriamo semplicemente la tabella
-    const nextState: State = { ...state, files: nextFiles };
-    // dispatch sequenziale per mantenere reducer semplice
     dispatch({ type: "ADD_FILES", files: nextFiles });
-    const table = buildMockTable(nextFiles, state.synonyms);
-    dispatch({ type: "SET_TABLE", table: { ...table, pinnedKeys: state.table?.pinnedKeys || [] } });
-    dispatch({ type: "SET_RESULTS", has: !!nextFiles.length });
+    if (!DISABLE_MOCKS) {
+      const table = buildMockTable(nextFiles, state.synonyms);
+      dispatch({ type: "SET_TABLE", table: { ...table, pinnedKeys: state.table?.pinnedKeys || [] } });
+      dispatch({ type: "SET_RESULTS", has: !!nextFiles.length });
+    }
   }, [state]);
 
   const regenerateTable = useCallback(() => {
+    if (DISABLE_MOCKS) {
+      // In produzione non rigeneriamo mock: il bottone diventa no-op
+      return;
+    }
     const table = buildMockTable(state.files, state.synonyms);
     dispatch({ type: "SET_TABLE", table: { ...table, pinnedKeys: [] } });
     dispatch({ type: "SET_RESULTS", has: true });
