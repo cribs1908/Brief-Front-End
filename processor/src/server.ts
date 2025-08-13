@@ -186,7 +186,7 @@ app.post("/extract", async (req, res) => {
     const pdfBuf = await fs.readFile(tmpPath);
     // Disabilita il worker in ambiente Node
     try { ((pdfjsLib as any).GlobalWorkerOptions ||= {}).workerSrc = undefined; } catch {}
-    const loadingTask = (pdfjsLib as any).getDocument({ data: pdfBuf });
+    const loadingTask = (pdfjsLib as any).getDocument({ data: new Uint8Array(pdfBuf) });
     const doc = await loadingTask.promise;
     const pages = doc.numPages || 0;
     const maxPages = hints?.max_pages && pages ? Math.min(hints.max_pages, pages) : pages;
