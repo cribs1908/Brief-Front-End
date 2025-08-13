@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createWriteStream, promises as fs } from "node:fs";
-import { join } from "node:path";
+import { join, extname } from "node:path";
 // Usa la build legacy di PDF.js per compatibilità Node 18/20 (evita Promise.withResolvers di Node 22)
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { request } from "undici";
@@ -101,7 +101,7 @@ async function fetchToTempFile(url: string): Promise<{ path: string; bytes: numb
   return { path: tmp, bytes: total };
 }
 
-async function runTesseract(inputPath: string, lang?: string): Promise<string> {
+async function runTesseractOnImage(inputPath: string, lang?: string): Promise<string> {
   // tesseract <input> stdout -l <lang> --psm 3
   return await new Promise<string>((resolve, reject) => {
     const args = [inputPath, "stdout"];
@@ -123,6 +123,46 @@ async function runTesseract(inputPath: string, lang?: string): Promise<string> {
       clearTimeout(to);
       if (code === 0) resolve(out);
       else reject({ code: "OCR_FAILED", message: err || `Exit ${code}` });
+    });
+  });
+}
+
+async function rasterizePdfToImages(inputPath: string, fromPage = 1, toPage?: number): Promise<string[]> {
+  return await new Promise<string[]>((resolve, reject) => {
+    const prefix = join(tmpdir(), `raster_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+    const args = ["-png", "-f", String(fromPage)];
+    if (toPage) args.push("-l", String(toPage));
+    args.push("-r", "200", inputPath, prefix);
+    const proc = spawn("pdftoppm", args, { stdio: ["ignore", "inherit", "pipe"] });
+    let err = "";
+    const to = setTimeout(() => {
+      try { proc.kill("SIGKILL"); } catch {}
+      reject({ code: "TIMEOUT", message: "pdftoppm timeout" });
+    }, PROC_TIMEOUT_MS);
+    proc.stderr.on("data", (d) => (err += d.toString("utf8")));
+    proc.on("error", (e) => {
+      clearTimeout(to);
+      reject({ code: "OCR_FAILED", message: `pdftoppm error: ${String(e)}` });
+    });
+    proc.on("close", async (code) => {
+      clearTimeout(to);
+      if (code !== 0) return reject({ code: "OCR_FAILED", message: err || `pdftoppm exit ${code}` });
+      // Collect files prefix-<n>.png
+      const paths: string[] = [];
+      const last = toPage ?? fromPage; // best effort
+      for (let i = fromPage; i <= last; i++) {
+        const p = `${prefix}-${i}.png`;
+        try {
+          await fs.access(p);
+          paths.push(p);
+        } catch {}
+      }
+      // If no numbered files, maybe single file
+      if (paths.length === 0) {
+        const single = `${prefix}.png`;
+        try { await fs.access(single); paths.push(single); } catch {}
+      }
+      resolve(paths);
     });
   });
 }
@@ -206,14 +246,35 @@ app.post("/extract", async (req, res) => {
       }
     }
     if (hints?.is_scanned || !hasNativeText) {
-      const ocrText = await runTesseract(tmpPath, hints?.expected_language);
-      ocr_used = true;
-      const perPage = ocrText.split(/\f/g); // form feed splits
-      for (let i = 0; i < perPage.length && (!maxPages || i < maxPages); i++) {
-        const clean = sanitizeText(perPage[i]);
+      // Rasterizza PDF in PNG e poi OCR per compatibilità con tesseract
+      let pagesTo = maxPages && maxPages > 0 ? maxPages : undefined;
+      let images: string[] = [];
+      try {
+        images = await rasterizePdfToImages(tmpPath, 1, pagesTo);
+      } catch (e: any) {
+        // fallback: prova direttamente tesseract (alcune build hanno supporto pdf limitato)
+        try {
+          const txt = await runTesseractOnImage(tmpPath, hints?.expected_language);
+          images = [];
+          logs.push("fallback: direct tesseract on pdf");
+          // Tratta come pagina unica
+          if (txt.trim()) {
+            textBlocks.push({ page: 1, text: sanitizeText(txt) });
+            ocr_used = true;
+          }
+        } catch (err) {
+          throw err;
+        }
+      }
+      for (let i = 0; i < images.length && (!maxPages || i < maxPages); i++) {
+        const imgPath = images[i];
+        const txt = await runTesseractOnImage(imgPath, hints?.expected_language);
+        const clean = sanitizeText(txt);
         if (clean.trim().length > 1) textBlocks.push({ page: i + 1, text: clean });
         logs.push(`p${i + 1}: ocr applied`);
+        ocr_used = true;
       }
+      ocr_used = true;
     } else {
       for (let i = 1; i <= pages && (!maxPages || i <= maxPages); i++) {
         const page = await doc.getPage(i);
