@@ -170,7 +170,7 @@
   background-image: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(8,10,15,0));
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
-[data-slot="toolbar-sticky"] {
+[data-slot="filter-sticky"] {
   position: sticky;
   top: calc(var(--header-height) + 4px);
   z-index: 30;

@@ -13,7 +13,7 @@ import { Badge } from "~/components/ui/badge";
 import { Link } from "react-router";
 import { useLocalStorage } from "~/hooks/use-local-storage";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "~/components/ui/sheet";
-import { IconTrash } from "@tabler/icons-react";
+import { IconTrash, IconFilter } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 
 function ExecutiveSummary() {
@@ -205,8 +205,8 @@ export default function NewComparisonPage() {
                   <CardDescription>Filtra, evidenzia e esporta</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {/* Toolbar sticky dentro la card */}
-                  <div data-slot="toolbar-sticky" className="mb-3 mt-2">
+                  {/* Toolbar non-sticky; solo il bottone Filter lo è */}
+                  <div data-slot="toolbar" className="mb-3 mt-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <Button data-slot="button" variant="outline" size="sm" onClick={exportCSV}>Esporta CSV</Button>
                       <Button data-slot="button" variant="outline" size="sm" onClick={copyKeynote}>Copia in Keynote</Button>
@@ -219,19 +219,24 @@ export default function NewComparisonPage() {
                         </div>
                       )}
                       <div className="ml-auto">
-                        <Sheet open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
-                          <SheetTrigger asChild>
-                            <Button data-slot="button" variant="outline" size="sm">Filtra metriche</Button>
-                          </SheetTrigger>
-                          <SheetContent side="right" className="w-full sm:max-w-md">
+                        <div data-slot="filter-sticky" className="inline-block">
+                          <Sheet open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
+                            <SheetTrigger asChild>
+                              <Button data-slot="button" size="sm">
+                                <IconFilter size={16} />
+                                Filter
+                              </Button>
+                            </SheetTrigger>
+                            <SheetContent side="right" className="w-full sm:max-w-md">
                             <SheetHeader>
                               <SheetTitle>Filtri</SheetTitle>
                             </SheetHeader>
                             <div className="p-4 space-y-4 overflow-y-auto">
                               <FiltersPanel />
                             </div>
-                          </SheetContent>
-                        </Sheet>
+                            </SheetContent>
+                          </Sheet>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -560,7 +565,7 @@ function VendorsHeader() {
   const price = state.table!.rows.find((r) => r.key === "Monthly Price ($)");
   const redCounts = redFlagCountPerVendor(state.table!);
   return (
-    <div className="sticky top-[calc(var(--header-height)+8px)] z-10 bg-[--background] py-2 mb-2">
+    <div className="sticky top-[calc(var(--header-height)+4px)] z-10 bg-[--background] py-2 mb-2">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
         {vendors.map((v, i) => (
           <div key={v.vendor} className="rounded-md border p-3" data-slot="input">
