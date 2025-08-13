@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "~/comp
 import { Badge } from "~/components/ui/badge";
 import { Link } from "react-router";
 import { useLocalStorage } from "~/hooks/use-local-storage";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "~/components/ui/sheet";
 
 function ExecutiveSummary() {
   const { state } = useComparison();
@@ -79,6 +80,7 @@ export default function NewComparisonPage() {
   const [justSaved, setJustSaved] = useState(false);
   const [notes, setNotes] = useLocalStorage<string>("comparison-notes", "");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
   const onSelectFiles = useCallback((list: FileList | null) => {
     if (!list) return;
@@ -199,41 +201,47 @@ export default function NewComparisonPage() {
                   <CardDescription>Filtra, evidenzia e esporta</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {/* Barra azioni (non sticky per evitare overlay) */}
-                  <div className="flex items-center justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-2">
+                  {/* Toolbar sticky dentro la card */}
+                  <div data-slot="toolbar-sticky" className="mb-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button data-slot="button" variant="outline" size="sm" onClick={exportCSV}>Esporta CSV</Button>
                       <Button data-slot="button" variant="outline" size="sm" onClick={copyKeynote}>Copia in Keynote</Button>
-                      <div className="flex items-center gap-2">
-                        <Input data-slot="input" value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder="Nome confronto" className="h-8 w-40" />
-                        <Button data-slot="button" size="sm" onClick={() => { saveToArchive(savingName || "Confronto"); setJustSaved(true); }}>Salva</Button>
-                        {justSaved && (
-                          <div className="flex items-center gap-2 text-xs">
-                            <Link to="/dashboard/archive" className="underline">Apri in Archivio</Link>
-                            <button className="underline" onClick={() => navigator.clipboard.writeText(window.location.href)}>Condividi link interno</button>
-                          </div>
-                        )}
+                      <Input data-slot="input" value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder="Nome confronto" className="h-8 w-40" />
+                      <Button data-slot="button" size="sm" onClick={() => { saveToArchive(savingName || "Confronto"); setJustSaved(true); }}>Salva</Button>
+                      {justSaved && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <Link to="/dashboard/archive" className="underline">Apri in Archivio</Link>
+                          <button className="underline" onClick={() => navigator.clipboard.writeText(window.location.href)}>Condividi link interno</button>
+                        </div>
+                      )}
+                      <div className="ml-auto min-w-[180px]">
+                        <div className="flex items-center gap-2">
+                          <Input data-slot="input" placeholder="Filtra metriche" className="h-8 w-full" onChange={(e) => state.table && setFilters({ ...state.table.filters, query: e.target.value })} />
+                          <Sheet open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
+                            <SheetTrigger asChild>
+                              <Button data-slot="button" variant="outline" size="sm">Filtra metriche</Button>
+                            </SheetTrigger>
+                            <SheetContent side="right" className="w-full sm:max-w-md">
+                              <SheetHeader>
+                                <SheetTitle>Filtri</SheetTitle>
+                              </SheetHeader>
+                              <div className="p-4 space-y-4 overflow-y-auto">
+                                <ActiveFiltersChipsFallback />
+                                <FiltersPanel />
+                              </div>
+                            </SheetContent>
+                          </Sheet>
+                        </div>
                       </div>
                     </div>
-                    <FiltersQuick onChangeQuery={(q) => state.table && setFilters({ ...state.table.filters, query: q })} />
                   </div>
 
+                  {/* Executive Summary sotto la toolbar */}
                   <ExecutiveSummary />
 
                   {/* Contenuti principali: header vendor + tabella */}
                   <VendorsHeader />
                   <ComparisonTableWrapper />
-                </CardContent>
-              </Card>
-
-              {/* Sezione Filtri separata (evita overlay con tabella) */}
-              <Card data-slot="card" id="filters">
-                <CardHeader>
-                  <CardTitle className="text-base">Filtri</CardTitle>
-                  <CardDescription>Restringi i risultati senza alterare il layout</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <FiltersPanel />
                 </CardContent>
               </Card>
 
@@ -289,6 +297,8 @@ function ComparisonTable({ collapsedGroups, setCollapsedGroups }: { collapsedGro
     (acc[r.category] ||= []).push(r);
     return acc;
   }, {});
+  // Mantieni visibili le intestazioni di gruppo anche quando "red flags only" nasconde tutte le righe del gruppo
+  const groupOrder = Object.keys(grouped);
 
   const toggleGroup = (name: string) => setCollapsedGroups({ ...collapsedGroups, [name]: !collapsedGroups[name] });
 
@@ -311,7 +321,14 @@ function ComparisonTable({ collapsedGroups, setCollapsedGroups }: { collapsedGro
           {filteredRows.length === 0 && (
             <TableRow>
               <TableCell colSpan={table.columns.length} className="text-center text-xs text-muted-foreground py-10">
-                Nessun risultato per i criteri selezionati
+                {state.table!.filters.showRedFlagsOnly ? (
+                  <span>
+                    Nessun rischio con le soglie attuali —
+                    <button className="ml-1 underline" onClick={() => {/* handled nel pannello filtri */}}>modifica soglie</button>
+                  </span>
+                ) : (
+                  "Nessun risultato per i criteri selezionati"
+                )}
               </TableCell>
             </TableRow>
           )}
@@ -337,10 +354,8 @@ function ComparisonTable({ collapsedGroups, setCollapsedGroups }: { collapsedGro
             <>
               <TableRow key={`h-${cat}`}>
                 <TableCell colSpan={table.columns.length}>
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">{cat}</div>
-                    <button className="text-xs underline" onClick={() => toggleGroup(cat)}>{collapsedGroups[cat] ? "Apri" : "Chiudi"}</button>
-                  </div>
+                  <button className="text-xs underline mr-2" onClick={() => toggleGroup(cat)}>{collapsedGroups[cat] ? "Apri" : "Chiudi"}</button>
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground align-middle">{cat}</span>
                 </TableCell>
               </TableRow>
               {!collapsedGroups[cat] && rows.map((r) => (
@@ -513,12 +528,12 @@ function MetricRow({ r }: { r: any }) {
       </TableCell>
       {r.values.map((v: any, i: number) => (
         <TableCell key={i} className={`${bestClass(r, i, v)} ${state.table!.filters.showRedFlagsOnly && isCellRedFlag(r, v) ? "outline outline-1 outline-[--destructive]" : ""}`}>
-          <div className="flex items-center gap-2">
-            {renderCell(v)}
+          <div className="flex items-center justify-between gap-2">
+            <div className="truncate">{renderCell(v)}</div>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-xs underline decoration-dotted cursor-help">fonte</span>
+                  <span className="text-[11px] text-muted-foreground underline decoration-dotted cursor-help shrink-0">fonte</span>
                 </TooltipTrigger>
                 <TooltipContent>
                   <div className="max-w-xs text-xs leading-5">
@@ -663,6 +678,28 @@ function InsightsPanel({ notes, setNotes }: { notes: string; setNotes: (v: strin
         <textarea className="w-full h-32 rounded-md border bg-transparent p-2 text-sm" placeholder="Scrivi note utili..." value={notes} onChange={(e) => setNotes(e.target.value)} />
         <div className="mt-2 text-right text-xs text-muted-foreground">Salvato automaticamente</div>
       </div>
+    </div>
+  );
+}
+
+function ActiveFiltersChipsFallback() {
+  const { state, setFilters } = useComparison();
+  if (!state.table) return null;
+  const f = state.table.filters;
+  const chips: string[] = [];
+  if (f.showDifferencesOnly) chips.push("Solo differenze");
+  if (f.showRedFlagsOnly) chips.push("Solo red flags");
+  if (f.showPinnedOnly) chips.push("Solo KPI fissati");
+  chips.push(`Soglia ${f.significancePercent}%`);
+  chips.push(...Object.entries(f.categories).filter(([, v]) => v).map(([k]) => k));
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap gap-2">
+        {chips.map((c) => (
+          <span key={c} className="text-[11px] px-2 py-0.5 rounded-md border">{c}</span>
+        ))}
+      </div>
+      <button className="text-xs underline" onClick={() => setFilters({ ...f, query: "", showDifferencesOnly: false, showRedFlagsOnly: false, showPinnedOnly: false, showSignificantOnly: false, significancePercent: 10, categories: Object.fromEntries(Object.keys(f.categories).map((k) => [k, true])) as any })}>Reset</button>
     </div>
   );
 }
