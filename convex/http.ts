@@ -216,8 +216,9 @@ http.route({
 });
 
 // Storage upload URL for client-side PDF uploads
+// Upload URL – usare un path che NON inizi con /api/storage/ per evitare conflitti con Convex file serving
 http.route({
-  path: "/api/storage/upload-url",
+  path: "/api/upload-url",
   method: "GET",
   handler: httpAction(async (ctx, _req) => {
     const url = await ctx.storage.generateUploadUrl();
@@ -236,7 +237,7 @@ http.route({
 });
 
 http.route({
-  path: "/api/storage/upload-url",
+  path: "/api/upload-url",
   method: "OPTIONS",
   handler: httpAction(async (_ctx, request) => {
     const headers = request.headers;

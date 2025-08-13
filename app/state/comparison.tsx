@@ -196,7 +196,7 @@ const API_BASE: string = (import.meta as any).env?.VITE_CONVEX_URL || "";
 const DISABLE_MOCKS: boolean = ((import.meta as any).env?.VITE_DISABLE_MOCKS || "true").toString() === "true";
 
 async function getUploadUrl(): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/storage/upload-url`);
+  const res = await fetch(`${API_BASE}/api/upload-url`);
   if (!res.ok) throw new Error("Upload URL non disponibile");
   const data = await res.json();
   return data.url as string;
@@ -306,9 +306,9 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     const nextFiles = state.files.map((f) => (f.id === fileId ? { ...f, vendorName } : f));
     dispatch({ type: "ADD_FILES", files: nextFiles });
     if (!DISABLE_MOCKS) {
-      const table = buildMockTable(nextFiles, state.synonyms);
-      dispatch({ type: "SET_TABLE", table: { ...table, pinnedKeys: state.table?.pinnedKeys || [] } });
-      dispatch({ type: "SET_RESULTS", has: !!nextFiles.length });
+    const table = buildMockTable(nextFiles, state.synonyms);
+    dispatch({ type: "SET_TABLE", table: { ...table, pinnedKeys: state.table?.pinnedKeys || [] } });
+    dispatch({ type: "SET_RESULTS", has: !!nextFiles.length });
     }
   }, [state]);
 
@@ -325,7 +325,7 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
   const startProcessing = useCallback(async () => {
     if (state.files.length < 2) return;
     try {
-      dispatch({ type: "SET_PROCESSING", processing: { step: 1, running: true } });
+    dispatch({ type: "SET_PROCESSING", processing: { step: 1, running: true } });
       // Upload PDF → storageId
       const items = await Promise.all(state.files.map(async (meta) => {
         const file = filesDataRef.current.get(meta.id);
@@ -370,7 +370,7 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     } catch (e) {
       console.error(e);
     } finally {
-      dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
+    dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
     }
   }, [state.files]);
 
