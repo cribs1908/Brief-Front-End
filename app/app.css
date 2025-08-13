@@ -172,7 +172,7 @@
 }
 [data-slot="filter-sticky"] {
   position: sticky;
-  top: calc(var(--header-height) + 4px);
+  top: calc(var(--header-height) + 8px);
   z-index: 10;
   background-color: transparent;
   backdrop-filter: blur(8px) saturate(120%);

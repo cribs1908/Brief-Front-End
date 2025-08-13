@@ -398,23 +398,17 @@ function FiltersPanel() {
   return (
     <div className="rounded-md border p-3" data-slot="input">
       <div className="text-sm font-medium mb-2">Filtri</div>
-      <div className="flex flex-wrap gap-2 mb-2">
-        <Button data-slot="button" size="sm" variant="outline" onClick={() => setFilters({ ...filters, categories: { Performance: true, Pricing: false, Compliance: true, Supporto: true, SDK: false }, priority: "Performance" })}>Performance</Button>
-        <Button data-slot="button" size="sm" variant="outline" onClick={() => setFilters({ ...filters, categories: { Performance: false, Pricing: true, Compliance: true, Supporto: true, SDK: false }, priority: "Pricing" })}>Pricing</Button>
-        <Button data-slot="button" size="sm" variant="outline" onClick={() => setFilters({ ...filters, categories: { Performance: true, Pricing: true, Compliance: true, Supporto: true, SDK: false }, priority: "Compliance" })}>Compliance</Button>
-        <Button data-slot="button" size="sm" variant="outline" onClick={() => setFilters({ ...filters })}>Personalizzato</Button>
-      </div>
-      <div className="flex items-center gap-2 py-1">
+      <div className="flex items-center gap-3 py-1">
         <Checkbox id="diff-only" checked={filters.showDifferencesOnly} onCheckedChange={() => setFilters({ ...filters, showDifferencesOnly: !filters.showDifferencesOnly })} />
-        <Label htmlFor="diff-only" className="text-sm">Mostra solo differenze</Label>
+        <Label htmlFor="diff-only" className="text-sm font-medium">Mostra solo differenze</Label>
       </div>
-      <div className="flex items-center gap-2 py-1">
+      <div className="flex items-center gap-3 py-1">
         <Checkbox id="red-only" checked={filters.showRedFlagsOnly} onCheckedChange={() => setFilters({ ...filters, showRedFlagsOnly: !filters.showRedFlagsOnly })} />
-        <Label htmlFor="red-only" className="text-sm">Mostra solo red flags</Label>
+        <Label htmlFor="red-only" className="text-sm font-medium">Mostra solo red flags</Label>
       </div>
-      <div className="flex items-center gap-2 py-1">
+      <div className="flex items-center gap-3 py-1">
         <Checkbox id="pinned-only" checked={filters.showPinnedOnly} onCheckedChange={() => setFilters({ ...filters, showPinnedOnly: !filters.showPinnedOnly })} />
-        <Label htmlFor="pinned-only" className="text-sm">Solo KPI fissati</Label>
+        <Label htmlFor="pinned-only" className="text-sm font-medium">Solo KPI fissati</Label>
       </div>
       <div className="flex items-center justify-between py-2">
         <Label htmlFor="sig" className="text-sm">Soglia differenze in %</Label>
@@ -424,23 +418,12 @@ function FiltersPanel() {
           <Checkbox checked={filters.showSignificantOnly} onCheckedChange={() => setFilters({ ...filters, showSignificantOnly: !filters.showSignificantOnly })} />
         </div>
       </div>
-      <div className="flex items-center justify-between py-2">
-        <Label className="text-sm">Priorità di analisi</Label>
-        <div className="flex gap-2">
-          {["Performance", "Compliance", "Pricing"].map((p) => (
-            <button key={p} className={`text-xs px-2 py-1 rounded-md border ${filters.priority === p ? "bg-[rgba(11,30,39,0.5)]" : ""}`} onClick={() => setFilters({ ...filters, priority: p as any })}>{p}</button>
-          ))}
-        </div>
-      </div>
       {Object.keys(filters.categories).map((k) => (
         <label key={k} className="flex items-center gap-2 py-1">
           <Checkbox checked={!!filters.categories[k]} onCheckedChange={() => toggle(k)} id={`cat-${k}`} />
           <Label htmlFor={`cat-${k}`} className="text-sm">{k}</Label>
         </label>
       ))}
-      <div className="mt-3 text-right text-xs text-muted-foreground">
-        <button className="underline" onClick={() => setFilters({ ...filters, categories: Object.fromEntries(Object.keys(filters.categories).map((k) => [k, true])) })}>Reset</button>
-      </div>
     </div>
   );
 }
