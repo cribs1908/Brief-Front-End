@@ -163,42 +163,6 @@
     --sidebar-ring: #0B1E27;
 }
 
-/* Light theme (premium) */
-html[data-theme="light"] {
-    --background: #F6F8FB;            /* soft paper */
-    --foreground: #0A0E14;            /* near-black for crisp text */
-    --card: #FFFFFF;                  /* clean surfaces */
-    --card-foreground: #0A0E14;
-    --popover: #FFFFFF;
-    --popover-foreground: #0A0E14;
-    --primary: #0B1E27;               /* premium deep teal */
-    --primary-foreground: #FFFFFF;
-    --secondary: #EAEFF5;             /* subtle secondary surface */
-    --secondary-foreground: #0A0E14;
-    --muted: #EEF3F8;                 /* muted blocks */
-    --muted-foreground: #4D5A67;      /* calm gray-blue */
-    --accent: #0B1E27;                /* accents consistent with brand */
-    --accent-foreground: #FFFFFF;
-    --destructive: #D94A4A;           /* premium red */
-    --destructive-foreground: #FFFFFF;
-    --border: #D6DEE8;                /* refined strokes */
-    --input: #F3F7FB;                 /* input fill */
-    --ring: #0B1E27;                  /* focus ring */
-    --chart-1: #2F6F84;               /* refined cool palette */
-    --chart-2: #4F8FA5;
-    --chart-3: #76AABF;
-    --chart-4: #A9C7D6;
-    --chart-5: #D6E6EF;
-    --sidebar: var(--background);
-    --sidebar-foreground: var(--foreground);
-    --sidebar-primary: var(--primary);
-    --sidebar-primary-foreground: var(--primary-foreground);
-    --sidebar-accent: var(--accent);
-    --sidebar-accent-foreground: var(--accent-foreground);
-    --sidebar-border: var(--border);
-    --sidebar-ring: var(--ring);
-}
-
 /* Premium UI refinements */
 [data-slot="card"] {
   box-shadow: none;
@@ -208,8 +172,8 @@ html[data-theme="light"] {
 }
 [data-slot="filter-sticky"] {
   position: sticky;
-  top: calc(var(--header-height) + 8px);
-  z-index: 10;
+  top: calc(var(--header-height) + 4px);
+  z-index: 30;
   background-color: transparent;
   backdrop-filter: blur(8px) saturate(120%);
   -webkit-backdrop-filter: blur(8px) saturate(120%);
@@ -259,12 +223,6 @@ html[data-theme="light"] {
 }
 [data-slot="sidebar"] {
   background-color: var(--background);
-}
-/* Subtle glass effect for light theme on sidebar controls */
-html[data-theme="light"] [data-slot="input"] {
-  background-color: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(8px) saturate(120%);
-  box-shadow: 0 0 0 1px var(--border);
 }
 
 /* App content area: riquadro con padding e piccola stroke (senza ombre) */

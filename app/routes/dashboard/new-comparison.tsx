@@ -63,7 +63,15 @@ function ExecutiveSummary() {
   const sentence1 = `Per priorità ${priority}, ${leader?.name ?? vendors[0]} è leader; rischi principali: ${risks.length ? risks.join(", ") : "nessuno rilevante"}.`;
   const sentence2 = cheaper ? `${cheaper.vendor} ha costo inferiore del ${cheaper.diff}% rispetto al più caro; verifica SLA e supporto.` : `Valuta trade-off tra prezzo e SLA rispetto alle priorità.`;
 
-  return null;
+  return (
+    <div className="rounded-md border p-3 mb-3" data-slot="input">
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-sm text-muted-foreground">
+          {sentence1} {sentence2}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function NewComparisonPage() {
@@ -233,7 +241,8 @@ export default function NewComparisonPage() {
                     </div>
                   </div>
 
-                  {/* Executive Summary spostato nella card Insight e Note */}
+                  {/* Executive Summary sotto la toolbar */}
+                  <ExecutiveSummary />
 
                   {/* Contenuti principali: header vendor + tabella */}
                   <VendorsHeader />
@@ -398,17 +407,23 @@ function FiltersPanel() {
   return (
     <div className="rounded-md border p-3" data-slot="input">
       <div className="text-sm font-medium mb-2">Filtri</div>
-      <div className="flex items-center gap-3 py-1">
+      <div className="flex flex-wrap gap-2 mb-2">
+        <Button data-slot="button" size="sm" variant="outline" onClick={() => setFilters({ ...filters, categories: { Performance: true, Pricing: false, Compliance: true, Supporto: true, SDK: false }, priority: "Performance" })}>Performance</Button>
+        <Button data-slot="button" size="sm" variant="outline" onClick={() => setFilters({ ...filters, categories: { Performance: false, Pricing: true, Compliance: true, Supporto: true, SDK: false }, priority: "Pricing" })}>Pricing</Button>
+        <Button data-slot="button" size="sm" variant="outline" onClick={() => setFilters({ ...filters, categories: { Performance: true, Pricing: true, Compliance: true, Supporto: true, SDK: false }, priority: "Compliance" })}>Compliance</Button>
+        <Button data-slot="button" size="sm" variant="outline" onClick={() => setFilters({ ...filters })}>Personalizzato</Button>
+      </div>
+      <div className="flex items-center gap-2 py-1">
         <Checkbox id="diff-only" checked={filters.showDifferencesOnly} onCheckedChange={() => setFilters({ ...filters, showDifferencesOnly: !filters.showDifferencesOnly })} />
-        <Label htmlFor="diff-only" className="text-sm font-medium">Mostra solo differenze</Label>
+        <Label htmlFor="diff-only" className="text-sm">Mostra solo differenze</Label>
       </div>
-      <div className="flex items-center gap-3 py-1">
+      <div className="flex items-center gap-2 py-1">
         <Checkbox id="red-only" checked={filters.showRedFlagsOnly} onCheckedChange={() => setFilters({ ...filters, showRedFlagsOnly: !filters.showRedFlagsOnly })} />
-        <Label htmlFor="red-only" className="text-sm font-medium">Mostra solo red flags</Label>
+        <Label htmlFor="red-only" className="text-sm">Mostra solo red flags</Label>
       </div>
-      <div className="flex items-center gap-3 py-1">
+      <div className="flex items-center gap-2 py-1">
         <Checkbox id="pinned-only" checked={filters.showPinnedOnly} onCheckedChange={() => setFilters({ ...filters, showPinnedOnly: !filters.showPinnedOnly })} />
-        <Label htmlFor="pinned-only" className="text-sm font-medium">Solo KPI fissati</Label>
+        <Label htmlFor="pinned-only" className="text-sm">Solo KPI fissati</Label>
       </div>
       <div className="flex items-center justify-between py-2">
         <Label htmlFor="sig" className="text-sm">Soglia differenze in %</Label>
@@ -418,12 +433,23 @@ function FiltersPanel() {
           <Checkbox checked={filters.showSignificantOnly} onCheckedChange={() => setFilters({ ...filters, showSignificantOnly: !filters.showSignificantOnly })} />
         </div>
       </div>
+      <div className="flex items-center justify-between py-2">
+        <Label className="text-sm">Priorità di analisi</Label>
+        <div className="flex gap-2">
+          {["Performance", "Compliance", "Pricing"].map((p) => (
+            <button key={p} className={`text-xs px-2 py-1 rounded-md border ${filters.priority === p ? "bg-[rgba(11,30,39,0.5)]" : ""}`} onClick={() => setFilters({ ...filters, priority: p as any })}>{p}</button>
+          ))}
+        </div>
+      </div>
       {Object.keys(filters.categories).map((k) => (
         <label key={k} className="flex items-center gap-2 py-1">
           <Checkbox checked={!!filters.categories[k]} onCheckedChange={() => toggle(k)} id={`cat-${k}`} />
           <Label htmlFor={`cat-${k}`} className="text-sm">{k}</Label>
         </label>
       ))}
+      <div className="mt-3 text-right text-xs text-muted-foreground">
+        <button className="underline" onClick={() => setFilters({ ...filters, categories: Object.fromEntries(Object.keys(filters.categories).map((k) => [k, true])) })}>Reset</button>
+      </div>
     </div>
   );
 }
@@ -626,52 +652,6 @@ function InsightsPanel({ notes, setNotes }: { notes: string; setNotes: (v: strin
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Executive summary sintetico */}
-      <div className="rounded-md border p-3" data-slot="input">
-        <div className="text-sm text-muted-foreground">
-          {(() => {
-            const vendors = table.vendorMeta.map((v) => v.vendor);
-            const findRow = (key: string) => table.rows.find((r) => r.key === key);
-            const sla = findRow("Uptime SLA (%)");
-            const price = findRow("Monthly Price ($)");
-            const support = findRow("Support Response (hrs)");
-            const priority = table.filters.priority;
-            const isMinBetterLocal = (k: string) => k === "Monthly Price ($)" || k === "Support Response (hrs)";
-            const scoreFor = (vendorIdx: number) => {
-              let score = 0;
-              const catWeight = (cat: string) => (cat === priority ? 3 : cat === "Compliance" ? 2 : 1);
-              for (const r of table.rows) {
-                if (r.type !== "numeric") continue;
-                const values = r.values.filter((v): v is number => typeof v === "number");
-                if (!values.length) continue;
-                const best = isMinBetterLocal(r.key) ? Math.min(...values) : Math.max(...values);
-                const v = r.values[vendorIdx];
-                if (typeof v === "number" && v === best) score += catWeight(r.category);
-              }
-              return score;
-            };
-            const ranking = vendors.map((name, i) => ({ name, score: scoreFor(i), idx: i })).sort((a, b) => b.score - a.score);
-            const leader = ranking[0];
-            const risks: string[] = [];
-            if (sla && sla.values.some((v) => typeof v === "number" && v < 99.9)) risks.push("SLA < 99.9%");
-            if (support && support.values.some((v) => typeof v === "number" && v > 24)) risks.push("Supporto > 24h");
-            if (findRow("SOC2")?.values.includes(false)) risks.push("SOC2 mancante");
-            const cheaper = price ? (() => {
-              const nums = price.values.filter((v): v is number => typeof v === "number");
-              if (nums.length < 2) return null;
-              const min = Math.min(...nums);
-              const max = Math.max(...nums);
-              const minIdx = price.values.findIndex((v) => v === min);
-              const diff = max === 0 ? 0 : Math.round(((max - min) / max) * 100);
-              return { vendor: vendors[minIdx], diff };
-            })() : null;
-            const s1 = `Per priorità ${priority}, ${leader?.name ?? vendors[0]} è leader; rischi principali: ${risks.length ? risks.join(", ") : "nessuno rilevante"}.`;
-            const s2 = cheaper ? `${cheaper.vendor} ha costo inferiore del ${cheaper.diff}% rispetto al più caro; verifica SLA e supporto.` : `Valuta trade-off tra prezzo e SLA rispetto alle priorità.`;
-            return `${s1} ${s2}`;
-          })()}
-        </div>
-      </div>
-
       <div className="rounded-md border p-3" data-slot="input">
         <div className="text-sm font-medium mb-2">Red flags</div>
         {!hasRed && table.filters.showRedFlagsOnly ? (
