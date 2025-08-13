@@ -63,15 +63,7 @@ function ExecutiveSummary() {
   const sentence1 = `Per priorità ${priority}, ${leader?.name ?? vendors[0]} è leader; rischi principali: ${risks.length ? risks.join(", ") : "nessuno rilevante"}.`;
   const sentence2 = cheaper ? `${cheaper.vendor} ha costo inferiore del ${cheaper.diff}% rispetto al più caro; verifica SLA e supporto.` : `Valuta trade-off tra prezzo e SLA rispetto alle priorità.`;
 
-  return (
-    <div className="rounded-md border p-3 mb-3" data-slot="input">
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-sm text-muted-foreground">
-          {sentence1} {sentence2}
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 export default function NewComparisonPage() {
@@ -241,8 +233,7 @@ export default function NewComparisonPage() {
                     </div>
                   </div>
 
-                  {/* Executive Summary sotto la toolbar */}
-                  <ExecutiveSummary />
+                  {/* Executive Summary spostato nella card Insight e Note */}
 
                   {/* Contenuti principali: header vendor + tabella */}
                   <VendorsHeader />
@@ -652,6 +643,52 @@ function InsightsPanel({ notes, setNotes }: { notes: string; setNotes: (v: strin
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Executive summary sintetico */}
+      <div className="rounded-md border p-3" data-slot="input">
+        <div className="text-sm text-muted-foreground">
+          {(() => {
+            const vendors = table.vendorMeta.map((v) => v.vendor);
+            const findRow = (key: string) => table.rows.find((r) => r.key === key);
+            const sla = findRow("Uptime SLA (%)");
+            const price = findRow("Monthly Price ($)");
+            const support = findRow("Support Response (hrs)");
+            const priority = table.filters.priority;
+            const isMinBetterLocal = (k: string) => k === "Monthly Price ($)" || k === "Support Response (hrs)";
+            const scoreFor = (vendorIdx: number) => {
+              let score = 0;
+              const catWeight = (cat: string) => (cat === priority ? 3 : cat === "Compliance" ? 2 : 1);
+              for (const r of table.rows) {
+                if (r.type !== "numeric") continue;
+                const values = r.values.filter((v): v is number => typeof v === "number");
+                if (!values.length) continue;
+                const best = isMinBetterLocal(r.key) ? Math.min(...values) : Math.max(...values);
+                const v = r.values[vendorIdx];
+                if (typeof v === "number" && v === best) score += catWeight(r.category);
+              }
+              return score;
+            };
+            const ranking = vendors.map((name, i) => ({ name, score: scoreFor(i), idx: i })).sort((a, b) => b.score - a.score);
+            const leader = ranking[0];
+            const risks: string[] = [];
+            if (sla && sla.values.some((v) => typeof v === "number" && v < 99.9)) risks.push("SLA < 99.9%");
+            if (support && support.values.some((v) => typeof v === "number" && v > 24)) risks.push("Supporto > 24h");
+            if (findRow("SOC2")?.values.includes(false)) risks.push("SOC2 mancante");
+            const cheaper = price ? (() => {
+              const nums = price.values.filter((v): v is number => typeof v === "number");
+              if (nums.length < 2) return null;
+              const min = Math.min(...nums);
+              const max = Math.max(...nums);
+              const minIdx = price.values.findIndex((v) => v === min);
+              const diff = max === 0 ? 0 : Math.round(((max - min) / max) * 100);
+              return { vendor: vendors[minIdx], diff };
+            })() : null;
+            const s1 = `Per priorità ${priority}, ${leader?.name ?? vendors[0]} è leader; rischi principali: ${risks.length ? risks.join(", ") : "nessuno rilevante"}.`;
+            const s2 = cheaper ? `${cheaper.vendor} ha costo inferiore del ${cheaper.diff}% rispetto al più caro; verifica SLA e supporto.` : `Valuta trade-off tra prezzo e SLA rispetto alle priorità.`;
+            return `${s1} ${s2}`;
+          })()}
+        </div>
+      </div>
+
       <div className="rounded-md border p-3" data-slot="input">
         <div className="text-sm font-medium mb-2">Red flags</div>
         {!hasRed && table.filters.showRedFlagsOnly ? (
