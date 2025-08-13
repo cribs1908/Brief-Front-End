@@ -11,6 +11,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+# Build TypeScript per produzione
+RUN npm run build
 
 # Provide tabula.jar at runtime via volume or bake it into the image
 # ENV TABULA_JAR_PATH=/app/tabula.jar
@@ -18,6 +20,7 @@ COPY . .
 ENV PORT=8787
 EXPOSE 8787
 
-CMD ["npm","run","dev"]
+# Avvio produzione: esegue il bundle compilato
+CMD ["node","dist/server.js"]
 
 

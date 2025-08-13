@@ -18,7 +18,7 @@ async function processPdfViaProcessor(uri: string): Promise<{ tables: any[]; tex
   const res = await fetch(`${base.replace(/\/$/, "")}/extract`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ uri }),
+    body: JSON.stringify({ pdf_url: uri }),
   });
   if (!res.ok) throw new Error(`Processor error ${res.status}`);
   const data = await res.json();

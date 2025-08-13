@@ -261,6 +261,7 @@ app.post("/extract", async (req, res) => {
 });
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/version", (_req, res) => res.json({ node: process.versions.node, versions: process.versions }));
 
 app.listen(PORT, () => {
   console.log(`[processor] listening on :${PORT}`);
