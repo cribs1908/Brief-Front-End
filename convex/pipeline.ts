@@ -29,40 +29,152 @@ async function processPdfViaProcessor(uri: string): Promise<{ tables: any[]; tex
   };
 }
 
-function extractLabelValuePairs(text: string): Array<{ label: string; value: string }> {
-  const pairs: Array<{ label: string; value: string }> = [];
+function extractLabelValuePairs(text: string): Array<{ label: string; value: string; confidence: number; sourceContext: string }> {
+  const pairs: Array<{ label: string; value: string; confidence: number; sourceContext: string }> = [];
   const lines = text.split(/\r?\n/);
-  for (const line of lines) {
-    const match = line.match(/^\s*([^:]{2,40})\s*:\s*(.+)$/);
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const context = lines.slice(Math.max(0, i-1), Math.min(lines.length, i+2)).join(' ');
+    
+    // Pattern 1: Label: Value (standard colon-separated)
+    let match = line.match(/^\s*([^:]{2,50})\s*:\s*(.+)$/);
     if (match) {
       const label = match[1].trim();
       const value = match[2].trim();
-      if (label && value) {
-        pairs.push({ label, value });
+      if (label && value && value !== '-' && value !== '—') {
+        pairs.push({ label, value, confidence: 0.9, sourceContext: context });
       }
     }
+    
+    // Pattern 2: Key-value in table format (e.g., "Monthly Price    $99")
+    match = line.match(/^\s*([A-Za-z][^$€£0-9]{5,40})\s{2,}([$€£]?\d+[.,]?\d*\s*[A-Za-z%]*)\s*$/);
+    if (match) {
+      const label = match[1].trim();
+      const value = match[2].trim();
+      pairs.push({ label, value, confidence: 0.8, sourceContext: context });
+    }
+    
+    // Pattern 3: Boolean-like patterns ("Feature X: Yes/No", "✓ Feature Y", "❌ Feature Z")
+    match = line.match(/^\s*([A-Za-z][^:]{5,40})\s*:\s*(yes|no|true|false|supported|not supported|available|unavailable|✓|❌|✔|✗)\s*$/i);
+    if (match) {
+      const label = match[1].trim();
+      const value = match[2].trim();
+      pairs.push({ label, value, confidence: 0.85, sourceContext: context });
+    }
+    
+    // Pattern 4: Numeric with units (e.g., "Latency 50ms", "Throughput: 1000 req/s")
+    match = line.match(/^\s*([A-Za-z][^0-9]{5,40})\s*:?\s*(\d+[.,]?\d*\s*[a-zA-Z/%]+)\s*$/);
+    if (match) {
+      const label = match[1].trim();
+      const value = match[2].trim();
+      pairs.push({ label, value, confidence: 0.9, sourceContext: context });
+    }
+    
+    // Pattern 5: List-like values (e.g., "Languages: Java, Python, Go")
+    match = line.match(/^\s*([A-Za-z][^:]{5,40})\s*:\s*([A-Za-z][^:]{10,100})\s*$/);
+    if (match && match[2].includes(',')) {
+      const label = match[1].trim();
+      const value = match[2].trim();
+      pairs.push({ label, value, confidence: 0.7, sourceContext: context });
+    }
   }
-  return pairs;
+  
+  // Deduplicate by label (keep highest confidence)
+  const deduped = new Map<string, typeof pairs[0]>();
+  for (const pair of pairs) {
+    const existing = deduped.get(pair.label.toLowerCase());
+    if (!existing || pair.confidence > existing.confidence) {
+      deduped.set(pair.label.toLowerCase(), pair);
+    }
+  }
+  
+  return Array.from(deduped.values());
 }
 
-function normalizeValueUnit(rawValue: string): { value: string | number | boolean; unit?: string } {
-  // Very simple heuristic normalization for MVP
-  const num = Number(rawValue.replace(/[, ]/g, ""));
-  if (!Number.isNaN(num) && /[0-9]/.test(rawValue)) {
-    // Extract unit suffix if present (e.g., "ms", "s", "MB", "GB")
-    const unitMatch = rawValue.match(/([a-zA-Z%]+)$/);
-    const unit = unitMatch ? unitMatch[1] : undefined;
-    return { value: num, unit };
+function normalizeValueUnit(rawValue: string, unitRules?: any): { value: string | number | boolean; unit?: string; confidence: number } {
+  const original = rawValue.trim();
+  let confidence = 0.8;
+  
+  // Handle boolean values first
+  const lowered = original.toLowerCase();
+  const truthy = ["yes", "true", "supported", "available", "enabled", "included", "✓", "✔", "1"];
+  const falsy = ["no", "false", "not supported", "unavailable", "disabled", "not included", "❌", "✗", "0", "—", "-"];
+  
+  if (truthy.some(t => lowered.includes(t))) {
+    return { value: true, confidence: 0.9 };
   }
-  const lowered = rawValue.toLowerCase();
-  if (["yes", "true", "supported", "available"].includes(lowered)) return { value: true };
-  if (["no", "false", "not supported", "unavailable", "—", "-"].includes(lowered)) return { value: false };
-  return { value: rawValue };
+  if (falsy.some(f => lowered.includes(f))) {
+    return { value: false, confidence: 0.9 };
+  }
+  
+  // Handle numeric values with units
+  const numericMatch = original.match(/^[$€£]?(\d+(?:[,.]\d+)?)\s*([a-zA-Z/%]+)?$/);
+  if (numericMatch) {
+    let num = parseFloat(numericMatch[1].replace(/,/g, ""));
+    let unit = numericMatch[2]?.toLowerCase();
+    
+    // Apply unit conversions if specified in unitRules
+    if (unit && unitRules?.conversions) {
+      const conversion = unitRules.conversions[unit];
+      if (conversion) {
+        num *= conversion;
+        unit = unitRules.base;
+        confidence = 0.95;
+      }
+    }
+    
+    // Handle percentage
+    if (unit === '%' || original.includes('%')) {
+      unit = 'percent';
+      confidence = 0.95;
+    }
+    
+    // Handle currency symbols
+    if (original.match(/^[$€£]/)) {
+      unit = original.charAt(0) === '$' ? 'USD' : original.charAt(0) === '€' ? 'EUR' : 'GBP';
+      confidence = 0.9;
+    }
+    
+    return { value: num, unit, confidence };
+  }
+  
+  // Handle time units without numbers (e.g., "Instant", "Real-time")
+  if (lowered.includes('instant') || lowered.includes('real-time') || lowered.includes('immediate')) {
+    return { value: 0, unit: 'ms', confidence: 0.7 };
+  }
+  
+  // Handle unlimited/infinite values
+  if (lowered.includes('unlimited') || lowered.includes('infinite') || lowered.includes('no limit')) {
+    return { value: Number.MAX_SAFE_INTEGER, confidence: 0.8 };
+  }
+  
+  // Handle list values (count commas for rough count)
+  if (original.includes(',')) {
+    const count = original.split(',').length;
+    return { value: count, unit: 'count', confidence: 0.6 };
+  }
+  
+  // Fallback to string value
+  return { value: original, confidence: 0.5 };
 }
 
 function pickBestValue(values: Array<any>) {
-  // For MVP, take the first (could be improved with confidence)
-  return values[0];
+  if (values.length === 0) return null;
+  if (values.length === 1) return values[0];
+  
+  // Sort by confidence descending, then by whether it's a table extraction (higher priority)
+  return values.sort((a, b) => {
+    const confA = a.confidence || 0;
+    const confB = b.confidence || 0;
+    const tableA = a.source_ref?.type === 'table' ? 1 : 0;
+    const tableB = b.source_ref?.type === 'table' ? 1 : 0;
+    
+    // First by table source (tables are more reliable)
+    if (tableA !== tableB) return tableB - tableA;
+    // Then by confidence
+    return confB - confA;
+  })[0];
 }
 
 export const getActiveSynonymMapQuery = query({
@@ -96,29 +208,130 @@ export const seedSynonymMapV1 = mutation({
     if (existing) return existing;
     const version = `v1-${Date.now()}`;
     const entries = [
+      // Performance metrics
       {
         canonicalMetricId: "THROUGHPUT_RPS",
         metricLabel: "Throughput (req/s)",
-        synonyms: ["throughput", "req/s", "requests per second", "rps"],
-        unitRules: { base: "rps" },
+        synonyms: ["throughput", "req/s", "requests per second", "rps", "requests/sec", "request rate"],
+        unitRules: { base: "rps", conversions: { "requests/sec": 1, "req/min": 0.0167 } },
         priority: 10,
         optimality: "max",
       },
       {
         canonicalMetricId: "LATENCY_MS",
         metricLabel: "Latency (ms)",
-        synonyms: ["latency", "response time", "rt", "ms"],
-        unitRules: { base: "ms" },
+        synonyms: ["latency", "response time", "rt", "delay", "response latency"],
+        unitRules: { base: "ms", conversions: { "s": 1000, "μs": 0.001 } },
         priority: 10,
         optimality: "min",
       },
       {
-        canonicalMetricId: "PRICE_USD",
-        metricLabel: "Price (USD)",
-        synonyms: ["price", "pricing", "cost"],
-        unitRules: { base: "USD" },
-        priority: 5,
+        canonicalMetricId: "CONCURRENT_FLAGS",
+        metricLabel: "Concurrent Flags",
+        synonyms: ["concurrent flags", "active flags", "flag count", "max flags", "simultaneous flags"],
+        unitRules: { base: "count" },
+        priority: 9,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "EVALUATIONS_MS",
+        metricLabel: "Evaluations/ms",
+        synonyms: ["evaluations per ms", "eval/ms", "flag evaluations", "evaluation rate"],
+        unitRules: { base: "eval/ms" },
+        priority: 8,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "MAX_ENVIRONMENTS",
+        metricLabel: "Max Environments",
+        synonyms: ["environments", "max environments", "environment count", "env limit"],
+        unitRules: { base: "count" },
+        priority: 7,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "DATA_RETENTION_DAYS",
+        metricLabel: "Data Retention (days)",
+        synonyms: ["data retention", "retention period", "log retention", "history retention"],
+        unitRules: { base: "days", conversions: { "months": 30, "years": 365 } },
+        priority: 6,
+        optimality: "max",
+      },
+      // Pricing metrics
+      {
+        canonicalMetricId: "MONTHLY_PRICE_USD",
+        metricLabel: "Monthly Price ($)",
+        synonyms: ["price", "pricing", "cost", "monthly cost", "subscription price", "plan price"],
+        unitRules: { base: "USD", conversions: { "€": 1.1, "£": 1.25 } },
+        priority: 9,
         optimality: "min",
+      },
+      {
+        canonicalMetricId: "SEATS_INCLUDED",
+        metricLabel: "Seats Included",
+        synonyms: ["seats", "users", "team members", "included seats", "user limit"],
+        unitRules: { base: "count" },
+        priority: 7,
+        optimality: "max",
+      },
+      // Compliance metrics
+      {
+        canonicalMetricId: "UPTIME_SLA_PERCENT",
+        metricLabel: "Uptime SLA (%)",
+        synonyms: ["uptime", "sla", "availability", "uptime guarantee", "service level"],
+        unitRules: { base: "percent" },
+        priority: 10,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "SOC2_COMPLIANCE",
+        metricLabel: "SOC2",
+        synonyms: ["soc2", "soc 2", "soc2 compliant", "soc2 certified"],
+        unitRules: { base: "boolean" },
+        priority: 8,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "GDPR_COMPLIANCE",
+        metricLabel: "GDPR",
+        synonyms: ["gdpr", "gdpr compliant", "gdpr ready", "data protection"],
+        unitRules: { base: "boolean" },
+        priority: 8,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "SAML_SSO",
+        metricLabel: "SAML/SSO",
+        synonyms: ["saml", "sso", "single sign-on", "saml sso", "identity provider"],
+        unitRules: { base: "boolean" },
+        priority: 7,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "AUDIT_LOGS",
+        metricLabel: "Audit Logs",
+        synonyms: ["audit logs", "logging", "activity logs", "audit trail"],
+        unitRules: { base: "boolean" },
+        priority: 6,
+        optimality: "max",
+      },
+      // Support metrics
+      {
+        canonicalMetricId: "SUPPORT_RESPONSE_HOURS",
+        metricLabel: "Support Response (hrs)",
+        synonyms: ["support response", "response time", "support sla", "first response"],
+        unitRules: { base: "hours", conversions: { "minutes": 0.0167, "days": 24 } },
+        priority: 8,
+        optimality: "min",
+      },
+      // SDK metrics
+      {
+        canonicalMetricId: "SDK_LANGUAGES_COUNT",
+        metricLabel: "SDKs Supported (count)",
+        synonyms: ["sdks", "languages", "sdk support", "programming languages", "client libraries"],
+        unitRules: { base: "count" },
+        priority: 6,
+        optimality: "max",
       },
     ];
     const id = await ctx.db.insert("synonymMaps", {
@@ -131,7 +344,7 @@ export const seedSynonymMapV1 = mutation({
   },
 });
 
-export const createComparisonJob = mutation({
+export const createComparisonJob = action({
   args: {
     pdf_list: v.array(
       v.object({
@@ -142,11 +355,11 @@ export const createComparisonJob = mutation({
     ),
     job_name: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<{ job_id: string; status_url: string }> => {
     // Ensure synonym map
     await ctx.runMutation(api.pipeline.seedSynonymMapV1 as any);
 
-    const jobId = await ctx.db.insert("comparisonJobs", {
+    const jobId: Id<"comparisonJobs"> = await ctx.runMutation(api.pipeline.insertComparisonJob, {
       name: args.job_name,
       status: "queued",
       createdAt: now(),
@@ -163,7 +376,7 @@ export const createComparisonJob = mutation({
         const tmpUrl = await ctx.storage.getUrl(spec.storageId);
         resolvedUri = tmpUrl ?? undefined;
       }
-      const docId = await ctx.db.insert("documents", {
+      const docId = await ctx.runMutation(api.pipeline.insertDocument, {
         jobId: jobId as Id<"comparisonJobs">,
         vendorName: spec.vendor_hint || undefined,
         sourceUri: resolvedUri,
@@ -173,7 +386,7 @@ export const createComparisonJob = mutation({
         pages: undefined,
         ocrUsed: undefined,
       });
-      await ctx.db.insert("extractionJobs", {
+      await ctx.runMutation(api.pipeline.insertExtractionJob, {
         jobId: jobId as Id<"comparisonJobs">,
         documentId: docId as Id<"documents">,
         vendorName: spec.vendor_hint || undefined,
@@ -189,6 +402,28 @@ export const createComparisonJob = mutation({
     await ctx.scheduler.runAfter(0, api.pipeline.processAllDocumentsForJob, { jobId: jobId as Id<"comparisonJobs"> });
 
     return { job_id: String(jobId), status_url: `/api/jobs/status?jobId=${String(jobId)}` };
+  },
+});
+
+// Helper mutations for actions
+export const insertComparisonJob = mutation({
+  args: { name: v.optional(v.string()), status: v.string(), createdAt: v.number(), updatedAt: v.number(), progress: v.object({ total: v.number(), completed: v.number(), stage: v.string() }), synonymMapVersion: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("comparisonJobs", args);
+  },
+});
+
+export const insertDocument = mutation({
+  args: { jobId: v.id("comparisonJobs"), vendorName: v.optional(v.string()), sourceUri: v.optional(v.string()), storageId: v.optional(v.id("_storage")), ingestedAt: v.number(), docType: v.optional(v.string()), pages: v.optional(v.number()), ocrUsed: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("documents", args);
+  },
+});
+
+export const insertExtractionJob = mutation({
+  args: { jobId: v.id("comparisonJobs"), documentId: v.id("documents"), vendorName: v.optional(v.string()), status: v.string(), error: v.optional(v.string()), qualityScore: v.optional(v.number()), createdAt: v.number(), updatedAt: v.number() },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("extractionJobs", args);
   },
 });
 
@@ -320,15 +555,16 @@ export const processExtractionJob = action({
     // Normalization
     const synonymMap = await ctx.runQuery(api.pipeline.getActiveSynonymMapQuery);
     const metrics: any[] = [];
-    for (const { label, value } of labelValuePairs) {
+    
+    // Process text blocks
+    for (const { label, value, confidence, sourceContext } of labelValuePairs) {
       const mapping = mapLabelToCanonical(synonymMap?.entries || [], label);
       if (!mapping.metricId) {
-        // propose synonym for high-confidence candidates (heuristic: numbers present)
-        const confidence = /[0-9]/.test(value) ? 0.8 : 0.5;
+        // propose synonym for high-confidence candidates
         if (confidence >= 0.75) {
           await ctx.runMutation(api.pipeline.proposeSynonym as any, {
             labelRaw: label,
-            context: undefined,
+            context: sourceContext,
             suggestedMetricId: undefined,
             confidence,
             vendorName: (document as any).vendorName,
@@ -340,16 +576,60 @@ export const processExtractionJob = action({
         }
         continue;
       }
-      const norm = normalizeValueUnit(value);
+      
+      // Find the matching entry for unit rules
+      const synonymEntry = synonymMap?.entries?.find(e => e.canonicalMetricId === mapping.metricId);
+      const norm = normalizeValueUnit(value, synonymEntry?.unitRules);
+      
       metrics.push({
         metricId: mapping.metricId,
         metricLabel: mapping.metricLabel,
         value_normalized: norm.value,
         unit_normalized: norm.unit,
-        confidence: 0.8,
-        source_ref: { type: "text", sample: value.slice(0, 120) },
+        confidence: Math.min(confidence, norm.confidence),
+        source_ref: { 
+          type: "text", 
+          sample: value.slice(0, 120),
+          context: sourceContext.slice(0, 200),
+          originalLabel: label 
+        },
         normalization_version: synonymMap?.version,
       });
+    }
+    
+    // Process tables (with higher confidence)
+    for (const table of tables) {
+      if (table.rows && Array.isArray(table.rows)) {
+        for (const row of table.rows) {
+          if (row.cells && Array.isArray(row.cells) && row.cells.length >= 2) {
+            const label = String(row.cells[0] || '').trim();
+            const value = String(row.cells[1] || '').trim();
+            
+            if (!label || !value) continue;
+            
+            const mapping = mapLabelToCanonical(synonymMap?.entries || [], label);
+            if (mapping.metricId) {
+              const synonymEntry = synonymMap?.entries?.find(e => e.canonicalMetricId === mapping.metricId);
+              const norm = normalizeValueUnit(value, synonymEntry?.unitRules);
+              
+              metrics.push({
+                metricId: mapping.metricId,
+                metricLabel: mapping.metricLabel,
+                value_normalized: norm.value,
+                unit_normalized: norm.unit,
+                confidence: norm.confidence * 1.2, // Table data gets confidence boost
+                source_ref: { 
+                  type: "table", 
+                  sample: value.slice(0, 120),
+                  table_position: { row: row.row || 0, col: 1 },
+                  originalLabel: label 
+                },
+                normalization_version: synonymMap?.version,
+              });
+            }
+          }
+        }
+      }
     }
 
     await ctx.runMutation(api.pipeline.insertNormalizedMetricsMutation, {
@@ -380,7 +660,10 @@ export const aggregateJob = action({
     const metricSet = new Map<string, { metricLabel: string; optimality?: "max" | "min" }>();
     const synonymMap = await ctx.runQuery(api.pipeline.getActiveSynonymMapQuery);
     for (const entry of synonymMap?.entries || []) {
-      metricSet.set(entry.canonicalMetricId, { metricLabel: entry.metricLabel, optimality: entry.optimality });
+      metricSet.set(entry.canonicalMetricId, { 
+        metricLabel: entry.metricLabel, 
+        optimality: entry.optimality as "max" | "min" | undefined
+      });
     }
     for (const docId in normalizedByDoc) {
       for (const m of normalizedByDoc[docId]) {
@@ -397,7 +680,13 @@ export const aggregateJob = action({
       matrix[metric.metricId] = {};
       for (const d of docs) {
         const values = (normalizedByDoc[String(d._id)] || []).filter(m => m.metricId === metric.metricId);
-        matrix[metric.metricId][String(d._id)] = values.length ? pickBestValue(values) : null;
+        const bestValue = values.length ? pickBestValue(values) : null;
+        matrix[metric.metricId][String(d._id)] = bestValue ? {
+          value_normalized: bestValue.value_normalized,
+          unit_normalized: bestValue.unit_normalized,
+          confidence: bestValue.confidence,
+          source_ref: bestValue.source_ref,
+        } : null;
       }
     }
 

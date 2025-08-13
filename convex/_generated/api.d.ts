@@ -8,12 +8,8 @@
  * @module
  */
 
-import type * as automations from "../automations.js";
-import type * as clients from "../clients.js";
-import type * as crons from "../crons.js";
 import type * as http from "../http.js";
-import type * as integrations from "../integrations.js";
-import type * as reports from "../reports.js";
+import type * as pipeline from "../pipeline.js";
 import type * as subscriptions from "../subscriptions.js";
 import type * as users from "../users.js";
 import type * as utils_crypto from "../utils/crypto.js";
@@ -33,12 +29,8 @@ import type {
  * ```
  */
 declare const fullApi: ApiFromModules<{
-  automations: typeof automations;
-  clients: typeof clients;
-  crons: typeof crons;
   http: typeof http;
-  integrations: typeof integrations;
-  reports: typeof reports;
+  pipeline: typeof pipeline;
   subscriptions: typeof subscriptions;
   users: typeof users;
   "utils/crypto": typeof utils_crypto;
