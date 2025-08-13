@@ -19,11 +19,9 @@
       "routes/dashboard/index": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
       "routes/dashboard/chat": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
       "routes/dashboard/settings": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
-      "routes/dashboard/accounts": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
-      "routes/dashboard/generator": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
-      "routes/dashboard/automation": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
-      "routes/dashboard/clients": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
-      "routes/dashboard/history": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0"
+      "routes/dashboard/new-comparison": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/dashboard/archive": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0",
+      "routes/dashboard/stats": "nodejs_eyJydW50aW1lIjoibm9kZWpzIn0"
     },
     "routes": {
       "root": {
@@ -119,47 +117,29 @@
           "runtime": "nodejs"
         }
       },
-      "routes/dashboard/accounts": {
-        "id": "routes/dashboard/accounts",
+      "routes/dashboard/new-comparison": {
+        "id": "routes/dashboard/new-comparison",
         "parentId": "routes/dashboard/layout",
-        "file": "app/routes/dashboard/accounts.tsx",
-        "path": "dashboard/accounts",
+        "file": "app/routes/dashboard/new-comparison.tsx",
+        "path": "dashboard/new-comparison",
         "config": {
           "runtime": "nodejs"
         }
       },
-      "routes/dashboard/generator": {
-        "id": "routes/dashboard/generator",
+      "routes/dashboard/archive": {
+        "id": "routes/dashboard/archive",
         "parentId": "routes/dashboard/layout",
-        "file": "app/routes/dashboard/generator.tsx",
-        "path": "dashboard/generator",
+        "file": "app/routes/dashboard/archive.tsx",
+        "path": "dashboard/archive",
         "config": {
           "runtime": "nodejs"
         }
       },
-      "routes/dashboard/automation": {
-        "id": "routes/dashboard/automation",
+      "routes/dashboard/stats": {
+        "id": "routes/dashboard/stats",
         "parentId": "routes/dashboard/layout",
-        "file": "app/routes/dashboard/automation.tsx",
-        "path": "dashboard/automation",
-        "config": {
-          "runtime": "nodejs"
-        }
-      },
-      "routes/dashboard/clients": {
-        "id": "routes/dashboard/clients",
-        "parentId": "routes/dashboard/layout",
-        "file": "app/routes/dashboard/clients.tsx",
-        "path": "dashboard/clients",
-        "config": {
-          "runtime": "nodejs"
-        }
-      },
-      "routes/dashboard/history": {
-        "id": "routes/dashboard/history",
-        "parentId": "routes/dashboard/layout",
-        "file": "app/routes/dashboard/history.tsx",
-        "path": "dashboard/history",
+        "file": "app/routes/dashboard/stats.tsx",
+        "path": "dashboard/stats",
         "config": {
           "runtime": "nodejs"
         }
@@ -242,35 +222,23 @@
         "file": "routes/dashboard/settings.tsx",
         "path": "dashboard/settings"
       },
-      "routes/dashboard/accounts": {
-        "id": "routes/dashboard/accounts",
+      "routes/dashboard/new-comparison": {
+        "id": "routes/dashboard/new-comparison",
         "parentId": "routes/dashboard/layout",
-        "file": "routes/dashboard/accounts.tsx",
-        "path": "dashboard/accounts"
+        "file": "routes/dashboard/new-comparison.tsx",
+        "path": "dashboard/new-comparison"
       },
-      "routes/dashboard/generator": {
-        "id": "routes/dashboard/generator",
+      "routes/dashboard/archive": {
+        "id": "routes/dashboard/archive",
         "parentId": "routes/dashboard/layout",
-        "file": "routes/dashboard/generator.tsx",
-        "path": "dashboard/generator"
+        "file": "routes/dashboard/archive.tsx",
+        "path": "dashboard/archive"
       },
-      "routes/dashboard/automation": {
-        "id": "routes/dashboard/automation",
+      "routes/dashboard/stats": {
+        "id": "routes/dashboard/stats",
         "parentId": "routes/dashboard/layout",
-        "file": "routes/dashboard/automation.tsx",
-        "path": "dashboard/automation"
-      },
-      "routes/dashboard/clients": {
-        "id": "routes/dashboard/clients",
-        "parentId": "routes/dashboard/layout",
-        "file": "routes/dashboard/clients.tsx",
-        "path": "dashboard/clients"
-      },
-      "routes/dashboard/history": {
-        "id": "routes/dashboard/history",
-        "parentId": "routes/dashboard/layout",
-        "file": "routes/dashboard/history.tsx",
-        "path": "dashboard/history"
+        "file": "routes/dashboard/stats.tsx",
+        "path": "dashboard/stats"
       }
     },
     "routeDiscovery": {
