@@ -13,7 +13,9 @@ import { Badge } from "~/components/ui/badge";
 import { Link } from "react-router";
 import { useLocalStorage } from "~/hooks/use-local-storage";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "~/components/ui/sheet";
-import { IconTrash, IconFilter } from "@tabler/icons-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader as DialogHeaderUI, DialogTitle as DialogTitleUI, DialogTrigger } from "~/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "~/components/ui/dropdown-menu";
+import { IconTrash, IconFilter, IconDotsVertical } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "~/components/ui/tabs";
 
 function ExecutiveSummary() {
@@ -82,6 +84,7 @@ export default function NewComparisonPage() {
   const [notes, setNotes] = useLocalStorage<string>("comparison-notes", "");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState<null | string>(null);
 
   const onSelectFiles = useCallback((list: FileList | null) => {
     if (!list) return;
@@ -140,21 +143,35 @@ export default function NewComparisonPage() {
                         <TableRow key={f.id} className="transition-colors hover:bg-[rgba(11,30,39,0.5)]">
                           <TableCell className="text-sm">{f.name}</TableCell>
                           <TableCell>
-                            <Input data-slot="input" className="h-8" defaultValue={f.vendorName || f.name.replace(/\.pdf$/i, "")} onBlur={(e) => renameVendor(f.id, e.target.value)} />
+                          <Input data-slot="input" className="h-8" defaultValue={f.vendorName || f.name.replace(/\.pdf$/i, "")} onBlur={(e) => renameVendor(f.id, e.target.value)} />
                           </TableCell>
                           <TableCell className="text-sm">{(f.size / 1024).toFixed(1)} KB</TableCell>
                           <TableCell className="text-xs text-muted-foreground">caricato</TableCell>
                           <TableCell>
-                            <Button
-                              data-slot="button"
-                              variant="outline"
-                              size="sm"
-                              aria-label="Rimuovi file"
-                              className="border-destructive/50 text-destructive hover:bg-destructive/20"
-                              onClick={() => handleRemove(f.id)}
-                            >
-                              <IconTrash size={16} />
-                            </Button>
+                            <Dialog open={deleteOpen === f.id} onOpenChange={(o) => setDeleteOpen(o ? f.id : null)}>
+                              <DialogTrigger asChild>
+                                <Button
+                                  data-slot="button"
+                                  variant="outline"
+                                  size="sm"
+                                  aria-label="Rimuovi file"
+                                  className="border-destructive/50 text-destructive hover:bg-destructive/20"
+                                  onClick={() => setDeleteOpen(f.id)}
+                                >
+                                  <IconTrash size={16} />
+                                </Button>
+                              </DialogTrigger>
+                              <DialogContent>
+                                <DialogHeaderUI>
+                                  <DialogTitleUI>Rimuovere questo file?</DialogTitleUI>
+                                  <DialogDescription>Questa azione non può essere annullata.</DialogDescription>
+                                </DialogHeaderUI>
+                                <DialogFooter>
+                                  <Button data-slot="button" variant="outline" onClick={() => setDeleteOpen(null)}>Annulla</Button>
+                                  <Button data-slot="button" variant="destructive" onClick={() => { handleRemove(f.id); setDeleteOpen(null); }}>Elimina</Button>
+                                </DialogFooter>
+                              </DialogContent>
+                            </Dialog>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -218,7 +235,17 @@ export default function NewComparisonPage() {
                           <button className="underline" onClick={() => navigator.clipboard.writeText(window.location.href)}>Condividi link interno</button>
                         </div>
                       )}
-                      <div className="ml-auto">
+                      <div className="ml-auto flex items-center gap-2">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button data-slot="button" variant="outline" size="sm"><IconDotsVertical size={16} /></Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={exportCSV}>Esporta CSV</DropdownMenuItem>
+                            <DropdownMenuItem onClick={copyKeynote}>Copia in Keynote</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { saveToArchive(savingName || "Confronto"); setJustSaved(true); }}>Salva</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <div data-slot="filter-sticky" className="inline-block">
                           <Sheet open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
                             <SheetTrigger asChild>
