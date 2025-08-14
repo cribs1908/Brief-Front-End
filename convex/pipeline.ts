@@ -123,19 +123,8 @@ function normalizeValueUnit(rawValue: string, unitRules?: any): { value: string 
   const original = rawValue.trim();
   let confidence = 0.8;
   
-  // Handle boolean values first
-  const lowered = original.toLowerCase();
-  const truthy = ["yes", "true", "supported", "available", "enabled", "included", "1"];
-  const falsy = ["no", "false", "not supported", "unavailable", "disabled", "not included", "0", "—", "-"];
-  
-  if (truthy.some(t => lowered.includes(t))) {
-    return { value: true, confidence: 0.9 };
-  }
-  if (falsy.some(f => lowered.includes(f))) {
-    return { value: false, confidence: 0.9 };
-  }
-  
-  // Handle numeric values with units
+  // Handle numeric values with units FIRST (before boolean check)
+  // This prevents "1500" from being interpreted as boolean because it contains "1"
   const numericMatch = original.match(/^[\$]?(\d+(?:[,.]\d+)?)\s*([a-zA-Z/%]+)?$/);
   if (numericMatch) {
     let num = parseFloat(numericMatch[1].replace(/,/g, ""));
@@ -170,6 +159,19 @@ function normalizeValueUnit(rawValue: string, unitRules?: any): { value: string 
     }
     
     return { value: num, unit, confidence };
+  }
+  
+  // Handle boolean values AFTER numeric check (moved here to avoid "1" in "1500" being interpreted as boolean)
+  const lowered = original.toLowerCase();
+  const truthy = ["yes", "true", "supported", "available", "enabled", "included"];
+  const falsy = ["no", "false", "not supported", "unavailable", "disabled", "not included", "—", "-"];
+  
+  // Use exact match for single digit to avoid false positives
+  if (original === "1" || truthy.some(t => lowered.includes(t))) {
+    return { value: true, confidence: 0.9 };
+  }
+  if (original === "0" || falsy.some(f => lowered.includes(f))) {
+    return { value: false, confidence: 0.9 };
   }
   
   // Handle time units without numbers (e.g., "Instant", "Real-time")
