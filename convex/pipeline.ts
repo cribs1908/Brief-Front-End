@@ -629,11 +629,6 @@ export const processExtractionJob = action({
             context: candidate.sourceContext,
             suggested_metric_id: undefined,
             confidence: candidate.confidence,
-            vendorName: (document as any).vendorName,
-            jobId: ej.jobId as Id<"comparisonJobs">,
-            documentId: (document as any)._id as Id<"documents">,
-            status: "proposed",
-            createdAt: now(),
           });
         }
         continue;
