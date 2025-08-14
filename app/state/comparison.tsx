@@ -2,7 +2,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useReducer } from "react";
 import { useLocalStorage } from "~/hooks/use-local-storage";
 
-export type ComparisonFile = { id: string; name: string; size: number; vendorName?: string };
+export type ComparisonFile = { id: string; name: string; size: number; vendorName?: string; storageId?: string; uploading?: boolean };
 export type SortState = { columnIndex: number; direction: "asc" | "desc" } | null;
 export type FiltersState = {
   query: string;
@@ -287,14 +287,34 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
   // persist
   React.useEffect(() => setPersisted(state), [state, setPersisted]);
 
-  const addFiles = useCallback((input: FileList | File[]) => {
+  const addFiles = useCallback(async (input: FileList | File[]) => {
     const list = Array.from(input as any as File[]);
     const next = list.map((f) => {
       const id = `${f.name}-${f.size}-${f.lastModified}`;
-      filesDataRef.current.set(id, f);
-      return { id, name: f.name, size: f.size } as ComparisonFile;
+      return { id, name: f.name, size: f.size, uploading: true } as ComparisonFile;
     });
     dispatch({ type: "ADD_FILES", files: next });
+
+    // Upload files immediately in parallel
+    for (const f of list) {
+      try {
+        const id = `${f.name}-${f.size}-${f.lastModified}`;
+        const storageId = await uploadPdfToStorage(f);
+        // Update just this file with storageId
+        dispatch({ 
+          type: "ADD_FILES", 
+          files: [{ id, name: f.name, size: f.size, storageId, uploading: false }] 
+        });
+      } catch (error) {
+        console.error(`Failed to upload ${f.name}:`, error);
+        // Mark as failed upload
+        const id = `${f.name}-${f.size}-${f.lastModified}`;
+        dispatch({ 
+          type: "ADD_FILES", 
+          files: [{ id, name: f.name, size: f.size, uploading: false }] 
+        });
+      }
+    }
   }, []);
 
   const removeFile = useCallback((id: string) => {
@@ -324,16 +344,23 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
 
   const startProcessing = useCallback(async () => {
     if (state.files.length < 2) return;
+    
+    // Check if all files have been uploaded
+    const unuploadedFiles = state.files.filter(f => !f.storageId || f.uploading);
+    if (unuploadedFiles.length > 0) {
+      alert(`Aspetta che tutti i file vengano caricati. File in corso: ${unuploadedFiles.map(f => f.name).join(', ')}`);
+      return;
+    }
+
     try {
-    dispatch({ type: "SET_PROCESSING", processing: { step: 1, running: true } });
-      // Upload PDF → storageId
-      const items = await Promise.all(state.files.map(async (meta) => {
-        const file = filesDataRef.current.get(meta.id);
-        if (!file) throw new Error(`File mancante per ${meta.name}`);
-        const storageId = await uploadPdfToStorage(file);
+      dispatch({ type: "SET_PROCESSING", processing: { step: 1, running: true } });
+      
+      // Use already uploaded storageIds
+      const items = state.files.map((meta) => {
+        if (!meta.storageId) throw new Error(`StorageId mancante per ${meta.name}`);
         const vendor_hint = meta.vendorName?.trim() || meta.name.replace(/\.pdf$/i, "");
-        return { storageId, vendor_hint };
-      }));
+        return { storageId: meta.storageId, vendor_hint };
+      });
 
       // Create job
       const res = await fetch(`${API_BASE}/api/jobs/create`, {

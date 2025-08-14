@@ -86,21 +86,24 @@ export default function NewComparisonPage() {
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState<null | string>(null);
 
-  const onSelectFiles = useCallback((list: FileList | null) => {
+  const onSelectFiles = useCallback(async (list: FileList | null) => {
     if (!list) return;
-    addFiles(list);
+    await addFiles(list);
   }, [addFiles]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    onSelectFiles(e.dataTransfer.files);
+    void onSelectFiles(e.dataTransfer.files);
   }, [onSelectFiles]);
 
   const handleBrowse = useCallback(() => inputRef.current?.click(), []);
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => onSelectFiles(e.target.files), [onSelectFiles]);
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => void onSelectFiles(e.target.files), [onSelectFiles]);
   const handleRemove = useCallback((id: string) => removeFile(id), [removeFile]);
 
-  const canStart = useMemo(() => state.files.length >= 2, [state.files.length]);
+  const canStart = useMemo(() => {
+    return state.files.length >= 2 && 
+           state.files.every(f => f.storageId && !f.uploading);
+  }, [state.files]);
   const startSimulated = useCallback(() => {
     void startProcessing();
   }, [startProcessing]);
@@ -146,7 +149,9 @@ export default function NewComparisonPage() {
                           <Input data-slot="input" className="h-8" defaultValue={f.vendorName || f.name.replace(/\.pdf$/i, "")} onBlur={(e) => renameVendor(f.id, e.target.value)} />
                           </TableCell>
                           <TableCell className="text-sm">{(f.size / 1024).toFixed(1)} KB</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">caricato</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {f.uploading ? "caricando..." : f.storageId ? "caricato" : "errore"}
+                          </TableCell>
                           <TableCell>
                             <Dialog open={deleteOpen === f.id} onOpenChange={(o) => setDeleteOpen(o ? f.id : null)}>
                               <DialogTrigger asChild>
