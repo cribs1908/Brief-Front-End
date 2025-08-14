@@ -24,11 +24,15 @@ async function processPdfViaProcessor(uri: string): Promise<{ tables: any[]; tex
   console.log("- Full endpoint:", `${base.replace(/\/$/, "")}/extract`);
   
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000);
     const res = await fetch(`${base.replace(/\/$/, "")}/extract`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pdf_url: uri }),
+      signal: controller.signal as any,
     });
+    clearTimeout(timeout);
     
     console.log("DEBUG: Railway processor response status:", res.status);
     console.log("DEBUG: Railway processor response ok:", res.ok);
@@ -76,7 +80,11 @@ async function processPdfViaProcessor(uri: string): Promise<{ tables: any[]; tex
       pages: data.pages,
     };
   } catch (error: any) {
-    console.error("DEBUG: Railway processor failed:", error?.message || error);
+    console.error("DEBUG: Railway processor failed:", error?.name, error?.message || error);
+    if (error?.name === "AbortError") {
+      // timeout: restituisci minimal extraction per sbloccare la pipeline
+      return { tables: [], textBlocks: [{ id: 0, text: "Processor timed out while extracting this PDF." }], pages: 1 };
+    }
     throw error;
   }
 }

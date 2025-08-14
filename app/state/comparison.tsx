@@ -438,7 +438,7 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
       if (!res.ok) throw new Error("Creazione job fallita");
       const { job_id } = await res.json();
 
-      // Poll status
+      // Poll status con short-circuit se dataset è già disponibile
       let status = "queued";
       let tries = 0;
       while (!["ready", "ready_partial", "failed", "failed_no_signal"].includes(status) && tries < 300) {
@@ -450,6 +450,17 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
         const step = stage === "aggregating" ? 3 : stage === "extracting" ? 1 : 2;
         dispatch({ type: "SET_PROCESSING", processing: { step, running: true } });
         if (["ready", "ready_partial"].includes(status)) break;
+        // Ogni 3 cicli, verifica se il dataset è già disponibile per evitare loop inutili
+        if (tries % 3 === 0) {
+          const dProbe = await fetch(`${API_BASE}/api/jobs/dataset?jobId=${encodeURIComponent(job_id)}`);
+          if (dProbe.ok) {
+            const probe = await dProbe.json();
+            if (probe && ((probe.vendors?.length || 0) > 0 || (probe.metrics?.length || 0) > 0)) {
+              status = "ready";
+              break;
+            }
+          }
+        }
         await new Promise((r) => setTimeout(r, 1500));
         tries++;
       }
