@@ -2,6 +2,7 @@ import { action, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { extractMetricCandidates } from "./langchain_parser";
 
 // Types
 type PdfSpec = { uri: string; vendor_hint?: string | null };
@@ -544,8 +545,6 @@ export const processExtractionJob = action({
 
     // Process via external processor
     const processed = await processPdfViaProcessor((document as any).sourceUri);
-    const assembledText = processed.textBlocks.map(b => b.text).join("\n\n");
-    const labelValuePairs = extractLabelValuePairs(assembledText);
     const tables: any[] = processed.tables;
     const textBlocks = processed.textBlocks;
 
@@ -553,26 +552,30 @@ export const processExtractionJob = action({
       documentId: (document as any)._id as Id<"documents">,
       tables,
       textBlocks,
-      extractionQuality: Math.min(1, labelValuePairs.length / 20),
+      extractionQuality: Math.min(1, textBlocks.length / 10),
       pageRefs: { pages: processed.pages },
       createdAt: now(),
     });
+
+    // LangChain semantic parsing (implements back-end.md section 4.3)
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const metricCandidates = await extractMetricCandidates(textBlocks, tables, openaiApiKey);
 
     // Normalization
     const synonymMap = await ctx.runQuery(api.pipeline.getActiveSynonymMapQuery);
     const metrics: any[] = [];
     
-    // Process text blocks
-    for (const { label, value, confidence, sourceContext } of labelValuePairs) {
-      const mapping = mapLabelToCanonical(synonymMap?.entries || [], label);
+    // Process LangChain extracted metrics
+    for (const candidate of metricCandidates) {
+      const mapping = mapLabelToCanonical(synonymMap?.entries || [], candidate.label);
       if (!mapping.metricId) {
         // propose synonym for high-confidence candidates
-        if (confidence >= 0.75) {
+        if (candidate.confidence >= 0.75) {
           await ctx.runMutation(api.pipeline.proposeSynonym as any, {
-            labelRaw: label,
-            context: sourceContext,
+            labelRaw: candidate.label,
+            context: candidate.sourceContext,
             suggestedMetricId: undefined,
-            confidence,
+            confidence: candidate.confidence,
             vendorName: (document as any).vendorName,
             jobId: ej.jobId as Id<"comparisonJobs">,
             documentId: (document as any)._id as Id<"documents">,
@@ -585,57 +588,23 @@ export const processExtractionJob = action({
       
       // Find the matching entry for unit rules
       const synonymEntry = synonymMap?.entries?.find(e => e.canonicalMetricId === mapping.metricId);
-      const norm = normalizeValueUnit(value, synonymEntry?.unitRules);
+      const norm = normalizeValueUnit(String(candidate.value), synonymEntry?.unitRules);
       
       metrics.push({
         metricId: mapping.metricId,
         metricLabel: mapping.metricLabel,
         value_normalized: norm.value,
-        unit_normalized: norm.unit,
-        confidence: Math.min(confidence, norm.confidence),
+        unit_normalized: candidate.unit || norm.unit,
+        confidence: Math.min(candidate.confidence, norm.confidence),
         source_ref: { 
           type: "text", 
-          sample: value.slice(0, 120),
-          context: sourceContext.slice(0, 200),
-          originalLabel: label 
+          sample: String(candidate.value).slice(0, 120),
+          context: candidate.sourceContext.slice(0, 200),
+          originalLabel: candidate.label,
+          pageRef: candidate.pageRef
         },
         normalization_version: synonymMap?.version,
       });
-    }
-    
-    // Process tables (with higher confidence)
-    for (const table of tables) {
-      if (table.rows && Array.isArray(table.rows)) {
-        for (const row of table.rows) {
-          if (row.cells && Array.isArray(row.cells) && row.cells.length >= 2) {
-            const label = String(row.cells[0] || '').trim();
-            const value = String(row.cells[1] || '').trim();
-            
-            if (!label || !value) continue;
-            
-            const mapping = mapLabelToCanonical(synonymMap?.entries || [], label);
-            if (mapping.metricId) {
-              const synonymEntry = synonymMap?.entries?.find(e => e.canonicalMetricId === mapping.metricId);
-              const norm = normalizeValueUnit(value, synonymEntry?.unitRules);
-              
-              metrics.push({
-                metricId: mapping.metricId,
-                metricLabel: mapping.metricLabel,
-                value_normalized: norm.value,
-                unit_normalized: norm.unit,
-                confidence: norm.confidence * 1.2, // Table data gets confidence boost
-                source_ref: { 
-                  type: "table", 
-                  sample: value.slice(0, 120),
-                  table_position: { row: row.row || 0, col: 1 },
-                  originalLabel: label 
-                },
-                normalization_version: synonymMap?.version,
-              });
-            }
-          }
-        }
-      }
     }
 
     await ctx.runMutation(api.pipeline.insertNormalizedMetricsMutation, {
