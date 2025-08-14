@@ -74,13 +74,14 @@ async function handlePdfWithOcrOnly(inputPath: string, hints: any, logs: string[
   
   try {
     // Strategia 1: Prova pdftoppm per rasterizzare
-    const images = await rasterizePdfToImages(inputPath, 1, hints?.max_pages || 10);
+    const maxPages = Math.min(hints?.max_pages || 6, 20);
+    const images = await rasterizePdfToImages(inputPath, 1, maxPages);
     pages = images.length || 1;
     
     for (let i = 0; i < images.length; i++) {
       const imgPath = images[i];
       try {
-        const txt = await runTesseractOnImage(imgPath, hints?.expected_language);
+         const txt = await runTesseractOnImage(imgPath, hints?.expected_language);
         const clean = sanitizeText(txt);
         if (clean.trim().length > 1) {
           textBlocks.push({ page: i + 1, text: clean });
@@ -125,6 +126,11 @@ async function handlePdfWithOcrOnly(inputPath: string, hints: any, logs: string[
     }
   } catch (tabulaErr: any) {
     logs.push(`Tabula failed on corrupted PDF: ${tabulaErr?.message || String(tabulaErr)}`);
+  }
+  
+  // Se nessun testo estratto, fornisci un blocco informativo minimo per evitare catene vuote
+  if (textBlocks.length === 0) {
+    textBlocks.push({ page: 1, text: "OCR did not extract readable text. The document may be image-only, low resolution, or non-Latin script." });
   }
   
   // Calcola qualità basata su OCR recovery
@@ -195,10 +201,11 @@ async function fetchToTempFile(url: string): Promise<{ path: string; bytes: numb
 }
 
 async function runTesseractOnImage(inputPath: string, lang?: string): Promise<string> {
-  // tesseract <input> stdout -l <lang> --psm 3
+  // tesseract <input> stdout -l <lang> --oem 1 --psm 3
   return await new Promise<string>((resolve, reject) => {
-    const args = [inputPath, "stdout"];
-    if (lang) args.push("-l", lang);
+    const args = [inputPath, "stdout", "--oem", "1", "--psm", "3"]; // OEM 1: LSTM only, PSM 3: fully automatic page segmentation
+    const language = lang && lang.trim() ? lang : "eng+ita";
+    args.push("-l", language);
     const proc = spawn("tesseract", args, { stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     let err = "";
@@ -225,7 +232,7 @@ async function rasterizePdfToImages(inputPath: string, fromPage = 1, toPage?: nu
     const prefix = join(tmpdir(), `raster_${Date.now()}_${Math.random().toString(36).slice(2)}`);
     const args = ["-png", "-f", String(fromPage)];
     if (toPage) args.push("-l", String(toPage));
-    args.push("-r", "200", inputPath, prefix);
+    args.push("-r", "300", inputPath, prefix); // 300 DPI per miglior OCR
     const proc = spawn("pdftoppm", args, { stdio: ["ignore", "inherit", "pipe"] });
     let err = "";
     const to = setTimeout(() => {
@@ -445,7 +452,20 @@ app.post("/extract", async (req, res) => {
   } catch (e: any) {
     const code = e?.code || "INTERNAL_ERROR";
     const message = e?.message || "Unexpected error";
-    const status = code === "UNSUPPORTED_PDF" ? 413 : code === "PDF_FETCH_FAILED" ? 400 : code === "TIMEOUT" ? 408 : 400;
+    // Su timeout o fetch fallito, restituiamo comunque 200 con fallback minimale per evitare loop lato chiamante
+    if (code === "TIMEOUT" || code === "PDF_FETCH_FAILED") {
+      return res.json({
+        pages: 1,
+        ocr_used: false,
+        extraction_quality: 0,
+        tables: [],
+        text_blocks: [
+          { page: 1, text: `PDF fetch failed: ${message}. Please verify the URL is accessible and try again.` }
+        ],
+        logs: [String(message)].slice(0, 1),
+      });
+    }
+    const status = code === "UNSUPPORTED_PDF" ? 413 : code === "TIMEOUT" ? 408 : 400;
     return sendError(res, code, message, undefined, status);
   } finally {
     if (tmp) {
