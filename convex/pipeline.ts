@@ -13,21 +13,47 @@ const now = () => Date.now();
 async function processPdfViaProcessor(uri: string): Promise<{ tables: any[]; textBlocks: Array<{ id: number; text: string }>; pages?: number }> {
   const base = process.env.PROCESSOR_SERVICE_URL;
   if (!base) {
+    console.log("DEBUG: No PROCESSOR_SERVICE_URL available, using fallback");
     // Fallback: no processor available, return empty extraction
     return { tables: [], textBlocks: [], pages: undefined };
   }
-  const res = await fetch(`${base.replace(/\/$/, "")}/extract`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pdf_url: uri }),
-  });
-  if (!res.ok) throw new Error(`Processor error ${res.status}`);
-  const data = await res.json();
-  return {
-    tables: data.tables || [],
-    textBlocks: (data.text_blocks || []).map((t: any, idx: number) => ({ id: idx, text: String(t.text || t).slice(0, 2000) })),
-    pages: data.pages,
-  };
+  
+  console.log("DEBUG: Calling Railway processor:");
+  console.log("- Processor URL:", base);
+  console.log("- PDF URL:", uri);
+  console.log("- Full endpoint:", `${base.replace(/\/$/, "")}/extract`);
+  
+  try {
+    const res = await fetch(`${base.replace(/\/$/, "")}/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pdf_url: uri }),
+    });
+    
+    console.log("DEBUG: Railway processor response status:", res.status);
+    console.log("DEBUG: Railway processor response ok:", res.ok);
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.log("DEBUG: Railway processor error response:", errorText);
+      throw new Error(`Processor error ${res.status}: ${errorText}`);
+    }
+    
+    const data = await res.json();
+    console.log("DEBUG: Railway processor success response:");
+    console.log("- Tables count:", data.tables?.length || 0);
+    console.log("- Text blocks count:", data.text_blocks?.length || 0);
+    console.log("- Pages:", data.pages);
+    
+    return {
+      tables: data.tables || [],
+      textBlocks: (data.text_blocks || []).map((t: any, idx: number) => ({ id: idx, text: String(t.text || t).slice(0, 2000) })),
+      pages: data.pages,
+    };
+  } catch (error: any) {
+    console.error("DEBUG: Railway processor failed:", error?.message || error);
+    throw error;
+  }
 }
 
 function extractLabelValuePairs(text: string): Array<{ label: string; value: string; confidence: number; sourceContext: string }> {
@@ -557,17 +583,29 @@ export const processExtractionJob = action({
       createdAt: now(),
     });
 
+    // Debug: log what we received from Railway processor
+    console.log("DEBUG: Received from Railway processor:");
+    console.log("- textBlocks count:", textBlocks.length);
+    console.log("- tables count:", tables.length);
+    console.log("- First 3 text blocks:", textBlocks.slice(0, 3));
+    console.log("- Document vendor:", (document as any).vendorName);
+
     // LangChain semantic parsing (implements back-end.md section 4.3)
     const openaiApiKey = process.env.OPENAI_API_KEY;
+    console.log("DEBUG: OpenAI API key available:", !!openaiApiKey);
     const metricCandidates = await extractMetricCandidates(textBlocks, tables, openaiApiKey);
+    console.log("DEBUG: LangChain extracted candidates:", metricCandidates.length, metricCandidates);
 
     // Normalization
     const synonymMap = await ctx.runQuery(api.pipeline.getActiveSynonymMapQuery);
     const metrics: any[] = [];
     
     // Process LangChain extracted metrics
+    console.log("DEBUG: Processing", metricCandidates.length, "metric candidates");
     for (const candidate of metricCandidates) {
+      console.log("DEBUG: Processing candidate:", candidate.label, "->", candidate.value);
       const mapping = mapLabelToCanonical(synonymMap?.entries || [], candidate.label);
+      console.log("DEBUG: Synonym mapping result:", mapping);
       if (!mapping.metricId) {
         // propose synonym for high-confidence candidates
         if (candidate.confidence >= 0.75) {
@@ -606,6 +644,9 @@ export const processExtractionJob = action({
         normalization_version: synonymMap?.version,
       });
     }
+
+    console.log("DEBUG: Final metrics array length:", metrics.length);
+    console.log("DEBUG: Final metrics:", metrics);
 
     await ctx.runMutation(api.pipeline.insertNormalizedMetricsMutation, {
       documentId: (document as any)._id as Id<"documents">,
