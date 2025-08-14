@@ -14,6 +14,8 @@ const PORT = Number(process.env.PORT || 8787);
 const MAX_PDF_BYTES = Number(process.env.MAX_PDF_BYTES || 25 * 1024 * 1024); // 25MB default
 const REQ_TIMEOUT_MS = Number(process.env.REQ_TIMEOUT_MS || 120000); // 120s
 const PROC_TIMEOUT_MS = Number(process.env.PROC_TIMEOUT_MS || 60000); // 60s for OCR/Tabula
+const OCR_DPI = Number(process.env.OCR_DPI || 200);
+const OCR_CHUNK_PAGES = Number(process.env.OCR_CHUNK_PAGES || 5);
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
 const ALLOW_HTTP = process.env.ALLOW_HTTP === "true"; // default disallow plain http
 
@@ -74,8 +76,17 @@ async function handlePdfWithOcrOnly(inputPath: string, hints: any, logs: string[
   
   try {
     // Strategia 1: Prova pdftoppm per rasterizzare
-    const maxPages = Math.min(hints?.max_pages || 4, 12);
-    const images = await rasterizePdfToImages(inputPath, 1, maxPages);
+    const totalPages = await getPdfPageCount(inputPath);
+    const maxPages = hints?.max_pages && hints.max_pages > 0 ? Math.min(hints.max_pages, totalPages) : totalPages;
+    // Rasterizza a chunk per evitare picchi di memoria su PDF lunghi
+    const images: string[] = [];
+    const chunk = Math.max(1, Math.min(OCR_CHUNK_PAGES, 25));
+    for (let start = 1; start <= maxPages; start += chunk) {
+      const end = Math.min(maxPages, start + chunk - 1);
+      const part = await rasterizePdfToImages(inputPath, start, end);
+      images.push(...part);
+      logs.push(`Rasterized pages ${start}-${end}`);
+    }
     pages = images.length || 1;
     
     for (let i = 0; i < images.length; i++) {
@@ -117,15 +128,12 @@ async function handlePdfWithOcrOnly(inputPath: string, hints: any, logs: string[
     }
   }
   
-  // Tabula può ancora funzionare anche con PDF "corrotti" se ha struttura tabellare valida
+  // Tabula chunked su PDF lunghi
   try {
-    const pageSpec = hints?.max_pages ? `1-${hints.max_pages}` : "all";
-    tables = await runTabulaTables(inputPath, pageSpec);
-    if (tables.length > 0) {
-      logs.push(`Tabula extracted ${tables.length} tables despite PDF structure issues`);
-    }
+    tables = await extractTablesInChunks(inputPath, pages, hints, logs);
+    if (tables.length > 0) logs.push(`Tabula extracted total ${tables.length} tables`);
   } catch (tabulaErr: any) {
-    logs.push(`Tabula failed on corrupted PDF: ${tabulaErr?.message || String(tabulaErr)}`);
+    logs.push(`Tabula failed: ${tabulaErr?.message || String(tabulaErr)}`);
   }
   
   // Se nessun testo estratto, fornisci un blocco informativo minimo per evitare catene vuote
@@ -232,7 +240,7 @@ async function rasterizePdfToImages(inputPath: string, fromPage = 1, toPage?: nu
     const prefix = join(tmpdir(), `raster_${Date.now()}_${Math.random().toString(36).slice(2)}`);
     const args = ["-png", "-f", String(fromPage)];
     if (toPage) args.push("-l", String(toPage));
-    args.push("-r", "200", inputPath, prefix); // 200 DPI: più leggero e stabile su hosting limitati
+    args.push("-r", String(OCR_DPI), inputPath, prefix);
     const proc = spawn("pdftoppm", args, { stdio: ["ignore", "inherit", "pipe"] });
     let err = "";
     const to = setTimeout(() => {
@@ -265,6 +273,35 @@ async function rasterizePdfToImages(inputPath: string, fromPage = 1, toPage?: nu
       resolve(paths);
     });
   });
+}
+
+async function getPdfPageCount(inputPath: string): Promise<number> {
+  return await new Promise<number>((resolve) => {
+    const proc = spawn("pdfinfo", [inputPath], { stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    proc.stdout.on("data", (d) => (out += d.toString("utf8")));
+    proc.on("close", () => {
+      const m = out.match(/Pages:\s+(\d+)/i);
+      resolve(m ? Number(m[1]) : 1);
+    });
+    proc.on("error", () => resolve(1));
+  });
+}
+
+async function extractTablesInChunks(inputPath: string, totalPages: number, hints: any, logs: string[]): Promise<Table[]> {
+  const tables: Table[] = [];
+  const chunk = Math.max(1, Math.min(OCR_CHUNK_PAGES, 25));
+  for (let start = 1; start <= totalPages; start += chunk) {
+    const end = Math.min(totalPages, start + chunk - 1);
+    try {
+      const part = await runTabulaTables(inputPath, `${start}-${end}`);
+      tables.push(...part);
+      logs.push(`Tabula: pages ${start}-${end}: +${part.length} tables`);
+    } catch (e: any) {
+      logs.push(`Tabula failed on pages ${start}-${end}: ${e?.message || String(e)}`);
+    }
+  }
+  return tables;
 }
 
 async function runTabulaTables(inputPath: string, pageSpec: string): Promise<Table[]> {

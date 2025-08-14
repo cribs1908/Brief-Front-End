@@ -27,7 +27,8 @@ async function processPdfViaProcessor(uri: string): Promise<{ tables: any[]; tex
     const res = await fetch(`${base.replace(/\/$/, "")}/extract`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pdf_url: uri }),
+      // Passa hint per PDF lunghi: processa tutte le pagine lato processor a chunk
+      body: JSON.stringify({ pdf_url: uri, hints: { max_pages: 0 } }),
     });
     
     console.log("DEBUG: Railway processor response status:", res.status);
