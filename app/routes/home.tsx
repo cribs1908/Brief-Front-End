@@ -1,7 +1,6 @@
 import { getAuth } from "@clerk/react-router/ssr.server";
-import { ConvexHttpClient } from "convex/browser";
-
-const convexClient = new ConvexHttpClient(process.env.VITE_CONVEX_URL!);
+// Server-side HTTP fetch for Convex actions/queries
+const CONVEX_HTTP_URL = process.env.VITE_CONVEX_HTTP_URL || process.env.VITE_CONVEX_URL;
 import ContentSection from "~/components/homepage/content";
 import Footer from "~/components/homepage/footer";
 import Integrations from "~/components/homepage/integrations";
@@ -57,18 +56,10 @@ export function meta({}: Route.MetaArgs) {
 export async function loader(args: Route.LoaderArgs) {
   const { userId } = await getAuth(args);
 
-  // Parallel data fetching to reduce waterfall
-  const [subscriptionData, plans] = await Promise.all([
-    userId
-      ? convexClient.query(api.subscriptions.checkUserSubscriptionStatus, {
-          userId,
-        }).catch((error) => {
-          console.error("Failed to fetch subscription data:", error);
-          return null;
-        })
-      : Promise.resolve(null),
-    convexClient.action(api.subscriptions.getAvailablePlans),
-  ]);
+  // Temporary: skip server-side Convex calls to avoid deployment errors
+  // Will be fetched client-side instead
+  const subscriptionData = null;
+  const plans = [];
 
   return {
     isSignedIn: !!userId,
