@@ -49,27 +49,19 @@ function sanitizeText(s: string): string {
 }
 
 function isValidPdfStructure(buffer: Buffer): boolean {
-  // Controlla header PDF
-  if (buffer.length < 8) return false;
+  // Controllo più permissivo: molti PDF validi possono mancare di alcuni marker o averli compressi
+  if (!buffer || buffer.length < 5) return false;
   
-  // PDF deve iniziare con "%PDF-" 
-  const header = buffer.subarray(0, 5).toString('ascii');
-  if (header !== '%PDF-') return false;
+  // Deve iniziare con %PDF
+  const header = buffer.subarray(0, 4).toString('ascii');
+  if (header !== '%PDF') return false;
   
-  // Controlla versione (1.0 - 2.0)
-  const version = buffer.subarray(5, 8).toString('ascii');
-  const versionMatch = version.match(/^(\d\.\d)/);
-  if (!versionMatch) return false;
-  
-  const versionNum = parseFloat(versionMatch[1]);
-  if (versionNum < 1.0 || versionNum > 2.0) return false;
-  
-  // Cerca trailer e xref (struttura base PDF)
-  const content = buffer.toString('binary');
-  const hasXref = content.includes('xref') || content.includes('/XRef');
-  const hasTrailer = content.includes('trailer') || content.includes('%%EOF');
-  
-  return hasXref || hasTrailer; // Almeno uno deve essere presente
+  // Verifica presenza di fine file o trailer in modo soft
+  const tailSlice = buffer.subarray(Math.max(0, buffer.length - 1024));
+  const tail = tailSlice.toString('binary');
+  const hasEOF = /%%EOF/i.test(tail);
+  // Non richiediamo xref esplicito, spesso è compresso o indiretto
+  return hasEOF || buffer.length > 1024; // euristica: se c'è EOF o file è abbastanza grande
 }
 
 async function handlePdfWithOcrOnly(inputPath: string, hints: any, logs: string[]): Promise<any> {
@@ -327,8 +319,11 @@ app.post("/extract", async (req, res) => {
     const pdfBuf = await fs.readFile(tmpPath);
     
     // Validazione base della struttura PDF
+    // Se fallisce, non interrompere: usa fallback OCR-only e restituisci 200
     if (!isValidPdfStructure(pdfBuf)) {
-      throw { code: "UNSUPPORTED_PDF", message: "Invalid PDF structure or corrupted file" };
+      logs.push("Base PDF validation failed: structure not recognized. Falling back to OCR-only mode");
+      const result = await handlePdfWithOcrOnly(tmpPath, hints, logs);
+      return res.json(result);
     }
     
     // Disabilita il worker in ambiente Node
