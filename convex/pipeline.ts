@@ -640,7 +640,15 @@ export const processExtractionJob = action({
       const valueWithUnit = candidate.unit ? 
         `${candidate.value} ${candidate.unit}` : 
         String(candidate.value);
+      
+      console.log("DEBUG: Normalizing value:");
+      console.log("- candidate:", candidate);
+      console.log("- valueWithUnit:", valueWithUnit);
+      console.log("- unitRules:", synonymEntry?.unitRules);
+      
       const norm = normalizeValueUnit(valueWithUnit, synonymEntry?.unitRules);
+      
+      console.log("DEBUG: Normalization result:", norm);
       
       metrics.push({
         metricId: mapping.metricId,
