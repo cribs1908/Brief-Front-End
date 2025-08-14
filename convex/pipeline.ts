@@ -10,83 +10,39 @@ type PdfSpec = { uri: string; vendor_hint?: string | null };
 // Helpers
 const now = () => Date.now();
 
-async function processPdfViaProcessor(uri: string): Promise<{ tables: any[]; textBlocks: Array<{ id: number; text: string }>; pages?: number }> {
-  const base = process.env.PROCESSOR_SERVICE_URL;
-  if (!base) {
-    console.log("DEBUG: No PROCESSOR_SERVICE_URL available, using fallback");
-    // Fallback: no processor available, return empty extraction
-    return { tables: [], textBlocks: [], pages: undefined };
-  }
-  
-  console.log("DEBUG: Calling Railway processor:");
-  console.log("- Processor URL:", base);
-  console.log("- PDF URL:", uri);
-  console.log("- Full endpoint:", `${base.replace(/\/$/, "")}/extract`);
-  
+async function processPdfDirect(ctx: any, storageId: string): Promise<{ tables: any[]; textBlocks: Array<{ id: number; text: string }>; pages?: number }> {
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000);
-    const res = await fetch(`${base.replace(/\/$/, "")}/extract`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pdf_url: uri }),
-      signal: controller.signal as any,
-    });
-    clearTimeout(timeout);
+    console.log("DEBUG: Processing PDF directly in Convex");
     
-    console.log("DEBUG: Railway processor response status:", res.status);
-    console.log("DEBUG: Railway processor response ok:", res.ok);
-    
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.log("DEBUG: Railway processor error response:", errorText);
-      
-      // Handle specific error cases gracefully
-      if (res.status === 400 || res.status === 413) {
-        let errorData;
-        try {
-          errorData = JSON.parse(errorText);
-        } catch {
-          errorData = { message: errorText };
-        }
-        
-        console.log("DEBUG: Processor returned error:", errorData);
-        
-        if (errorData.code === "UNSUPPORTED_PDF" || errorText.includes("Invalid PDF structure")) {
-          console.log("DEBUG: PDF unsupported/invalid, falling back to error extraction");
-          return { 
-            tables: [], 
-            textBlocks: [{ 
-              id: 0, 
-              text: `PDF extraction failed: ${errorData.message || "Invalid PDF structure"}. File may be corrupted, password-protected, or incompatible format.` 
-            }],
-            pages: 1 
-          };
-        }
-      }
-      
-      throw new Error(`Processor error ${res.status}: ${errorText}`);
-    }
-    
-    const data = await res.json();
-    console.log("DEBUG: Railway processor success response:");
-    console.log("- Tables count:", data.tables?.length || 0);
-    console.log("- Text blocks count:", data.text_blocks?.length || 0);
-    console.log("- Pages:", data.pages);
+    // Use direct PDF processing action
+    const result = await ctx.runAction(api.pdf_processor.processPdfDirect, { storageId });
     
     return {
-      tables: data.tables || [],
-      textBlocks: (data.text_blocks || []).map((t: any, idx: number) => ({ id: idx, text: String(t.text || t).slice(0, 2000) })),
-      pages: data.pages,
+      tables: result.tables || [],
+      textBlocks: (result.text_blocks || []).map((t: any, idx: number) => ({ id: idx, text: String(t.text || '').slice(0, 2000) })),
+      pages: result.pages || 1,
     };
   } catch (error: any) {
-    console.error("DEBUG: Railway processor failed:", error?.name, error?.message || error);
-    if (error?.name === "AbortError") {
-      // timeout: restituisci minimal extraction per sbloccare la pipeline
-      return { tables: [], textBlocks: [{ id: 0, text: "Processor timed out while extracting this PDF." }], pages: 1 };
-    }
-    throw error;
+    console.error("DEBUG: Direct PDF processing failed:", error?.message || error);
+    // Fallback: return minimal extraction to prevent pipeline breakage
+    return { 
+      tables: [], 
+      textBlocks: [{ id: 0, text: `Direct PDF processing failed: ${error?.message || 'Unknown error'}. The document may be in an unsupported format.` }], 
+      pages: 1 
+    };
   }
+}
+
+// Legacy function - deprecated in favor of processPdfDirect
+async function processPdfViaProcessor(uri: string): Promise<{ tables: any[]; textBlocks: Array<{ id: number; text: string }>; pages?: number }> {
+  console.log("WARNING: Legacy processPdfViaProcessor called - this function is deprecated");
+  console.log("Returning minimal fallback extraction");
+  
+  return {
+    tables: [],
+    textBlocks: [{ id: 0, text: "Legacy Railway processor has been deprecated. Using direct Convex processing instead." }],
+    pages: 1
+  };
 }
 
 function extractLabelValuePairs(text: string): Array<{ label: string; value: string; confidence: number; sourceContext: string }> {
@@ -629,8 +585,12 @@ export const processExtractionJob = action({
       const document = await ctx.runQuery(api.pipeline.getDocumentById, { documentId: ej.documentId as Id<"documents"> });
       if (!document) throw new Error("Document not found");
 
-      // Process via external processor
-      const processed = await processPdfViaProcessor((document as any).sourceUri);
+      // Process via direct Convex processing (eliminates Railway dependency)
+      const storageId = (document as any).storageId || (document as any).sourceUri;
+      if (!storageId) throw new Error("Document has no storageId for processing");
+      
+      console.log("DEBUG: Processing document with storageId:", storageId);
+      const processed = await processPdfDirect(ctx, storageId);
       const tables: any[] = processed.tables;
       const textBlocks = processed.textBlocks;
 

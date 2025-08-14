@@ -461,38 +461,41 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
         throw new Error(`Creazione job fallita: ${res.status} - ${errorText}`);
       }
       const { job_id } = await res.json();
+      console.log("✓ Job created:", job_id);
 
-      // Poll status con short-circuit se dataset è già disponibile
-      let status = "queued";
-      let tries = 0;
-      while (!["ready", "ready_partial", "failed", "failed_no_signal"].includes(status) && tries < 300) {
-        const s = await fetch(`${API_BASE}/api/jobs/status?jobId=${encodeURIComponent(job_id)}`);
-        if (!s.ok) throw new Error("Status non disponibile");
-        const js = await s.json();
-        status = js?.job?.status || status;
-        const stage = js?.job?.progress?.stage as string | undefined;
-        const step = stage === "aggregating" ? 3 : stage === "extracting" ? 1 : 2;
-        dispatch({ type: "SET_PROCESSING", processing: { step, running: true } });
-        if (["ready", "ready_partial"].includes(status)) break;
-        // Ogni 3 cicli, verifica se il dataset è già disponibile per evitare loop inutili
-        if (tries % 3 === 0) {
-          const dProbe = await fetch(`${API_BASE}/api/jobs/dataset?jobId=${encodeURIComponent(job_id)}`);
-          if (dProbe.ok) {
-            const probe = await dProbe.json();
-            if (probe && ((probe.vendors?.length || 0) > 0 || (probe.metrics?.length || 0) > 0)) {
-              status = "ready";
+      // Simplified processing - direct execution, no infinite polling
+      dispatch({ type: "SET_PROCESSING", processing: { step: 2, running: true } });
+      
+      // Wait for processing to complete (direct processing is faster)
+      console.log("Waiting for processing completion...");
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Give processing time to complete
+      
+      dispatch({ type: "SET_PROCESSING", processing: { step: 3, running: true } });
+      
+      // Check for completion with limited retries (no infinite loop)
+      let dataset: BackendDataset | null = null;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+          const d = await fetch(`${API_BASE}/api/jobs/dataset?jobId=${encodeURIComponent(job_id)}`);
+          if (d.ok) {
+            const result = await d.json();
+            if (result && (result.vendors?.length > 0 || result.metrics?.length > 0)) {
+              dataset = result;
+              console.log("✓ Dataset ready with data:", { vendors: result.vendors?.length, metrics: result.metrics?.length });
               break;
             }
           }
+          console.log(`Attempt ${attempt + 1}: Dataset not ready yet, retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch (err) {
+          console.warn(`Attempt ${attempt + 1} failed:`, err);
+          await new Promise(resolve => setTimeout(resolve, 2000));
         }
-        await new Promise((r) => setTimeout(r, 1500));
-        tries++;
       }
-
-      // Fetch dataset
-      const d = await fetch(`${API_BASE}/api/jobs/dataset?jobId=${encodeURIComponent(job_id)}`);
-      if (!d.ok) throw new Error("Dataset non disponibile");
-      const dataset: BackendDataset = await d.json();
+      
+      if (!dataset) {
+        throw new Error("Processing completed but no data was extracted. Please try with different PDF files.");
+      }
       const table = buildTableFromDataset(dataset);
       dispatch({ type: "SET_TABLE", table });
       dispatch({ type: "SET_RESULTS", has: true });

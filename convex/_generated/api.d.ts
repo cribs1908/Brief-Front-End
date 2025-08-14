@@ -11,6 +11,7 @@
 import type * as http from "../http.js";
 import type * as http_full from "../http_full.js";
 import type * as langchain_parser from "../langchain_parser.js";
+import type * as pdf_processor from "../pdf_processor.js";
 import type * as pipeline from "../pipeline.js";
 import type * as subscriptions from "../subscriptions.js";
 import type * as users from "../users.js";
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   http_full: typeof http_full;
   langchain_parser: typeof langchain_parser;
+  pdf_processor: typeof pdf_processor;
   pipeline: typeof pipeline;
   subscriptions: typeof subscriptions;
   users: typeof users;
