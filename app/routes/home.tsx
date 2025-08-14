@@ -59,7 +59,7 @@ export async function loader(args: Route.LoaderArgs) {
   // Temporary: skip server-side Convex calls to avoid deployment errors
   // Will be fetched client-side instead
   const subscriptionData = null;
-  const plans = [];
+  const plans = { items: [] }; // Match expected structure
 
   return {
     isSignedIn: !!userId,
