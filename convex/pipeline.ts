@@ -636,7 +636,11 @@ export const processExtractionJob = action({
       
       // Find the matching entry for unit rules
       const synonymEntry = synonymMap?.entries?.find(e => e.canonicalMetricId === mapping.metricId);
-      const norm = normalizeValueUnit(String(candidate.value), synonymEntry?.unitRules);
+      // Combine value and unit for normalization
+      const valueWithUnit = candidate.unit ? 
+        `${candidate.value} ${candidate.unit}` : 
+        String(candidate.value);
+      const norm = normalizeValueUnit(valueWithUnit, synonymEntry?.unitRules);
       
       metrics.push({
         metricId: mapping.metricId,
