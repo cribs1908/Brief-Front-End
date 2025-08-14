@@ -412,6 +412,12 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
       return;
     }
     
+    // Production diagnostic logging
+    console.log("=== PROCESSING START ===");
+    console.log("API_BASE:", API_BASE);
+    console.log("Files to process:", state.files.map(f => ({ name: f.name, storageId: f.storageId })));
+    console.log("DISABLE_MOCKS:", DISABLE_MOCKS);
+    
     // Check if all files have been uploaded
     const unuploadedFiles = state.files.filter(f => !f.storageId || f.uploading);
     if (unuploadedFiles.length > 0) {
@@ -422,6 +428,18 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     try {
       dispatch({ type: "SET_PROCESSING", processing: { step: 1, running: true } });
       
+      // Health check: test API connectivity first
+      try {
+        const healthRes = await fetch(`${API_BASE}/api/upload-url`);
+        if (!healthRes.ok) {
+          throw new Error(`API connectivity test failed: ${healthRes.status}`);
+        }
+        console.log("✓ API connectivity confirmed");
+      } catch (healthErr) {
+        console.error("✗ API connectivity failed:", healthErr);
+        throw new Error(`Cannot connect to backend: ${healthErr instanceof Error ? healthErr.message : healthErr}`);
+      }
+      
       // Use already uploaded storageIds
       const items = state.files.map((meta) => {
         if (!meta.storageId) throw new Error(`StorageId mancante per ${meta.name}`);
@@ -429,13 +447,19 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
         return { storageId: meta.storageId, vendor_hint };
       });
 
+      console.log("Creating job with items:", items);
+
       // Create job
       const res = await fetch(`${API_BASE}/api/jobs/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pdf_list: items, job_name: "Confronto" }),
       });
-      if (!res.ok) throw new Error("Creazione job fallita");
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Job creation failed:", res.status, errorText);
+        throw new Error(`Creazione job fallita: ${res.status} - ${errorText}`);
+      }
       const { job_id } = await res.json();
 
       // Poll status con short-circuit se dataset è già disponibile
@@ -473,7 +497,33 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
       dispatch({ type: "SET_TABLE", table });
       dispatch({ type: "SET_RESULTS", has: true });
     } catch (e) {
-      console.error(e);
+      console.error("Processing failed:", e);
+      
+      // Production-ready error handling: always show something to user
+      const errorMsg = e instanceof Error ? e.message : "Processing failed unexpectedly";
+      
+      // Create minimal diagnostic table to show extraction attempt
+      const diagnosticTable = {
+        columns: ["Metrica", ...state.files.map(f => f.vendorName || f.name.replace(/\.pdf$/i, ""))],
+        vendorMeta: state.files.map((f, i) => ({ 
+          vendor: f.vendorName || f.name.replace(/\.pdf$/i, ""), 
+          source: f.name, 
+          docId: `error-${i}`, 
+          dateParsed: Date.now() 
+        })),
+        rows: [{
+          key: "Extraction Status",
+          category: "Performance", 
+          type: "text" as const,
+          values: state.files.map(() => `Failed: ${errorMsg}`)
+        }],
+        sort: null,
+        filters: defaultFilters,
+        pinnedKeys: []
+      };
+      
+      dispatch({ type: "SET_TABLE", table: diagnosticTable });
+      dispatch({ type: "SET_RESULTS", has: true });
     } finally {
     dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
     }
