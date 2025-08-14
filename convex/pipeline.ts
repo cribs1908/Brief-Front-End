@@ -572,9 +572,9 @@ export const processExtractionJob = action({
         // propose synonym for high-confidence candidates
         if (candidate.confidence >= 0.75) {
           await ctx.runMutation(api.pipeline.proposeSynonym as any, {
-            labelRaw: candidate.label,
+            label_raw: candidate.label,
             context: candidate.sourceContext,
-            suggestedMetricId: undefined,
+            suggested_metric_id: undefined,
             confidence: candidate.confidence,
             vendorName: (document as any).vendorName,
             jobId: ej.jobId as Id<"comparisonJobs">,
