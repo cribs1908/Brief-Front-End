@@ -48,15 +48,15 @@ function extractLabelValuePairs(text: string): Array<{ label: string; value: str
     }
     
     // Pattern 2: Key-value in table format (e.g., "Monthly Price    $99")
-    match = line.match(/^\s*([A-Za-z][^$€£0-9]{5,40})\s{2,}([$€£]?\d+[.,]?\d*\s*[A-Za-z%]*)\s*$/);
+    match = line.match(/^\s*([A-Za-z][^\$0-9]{5,40})\s{2,}([\$]?\d+[.,]?\d*\s*[A-Za-z%]*)\s*$/);
     if (match) {
       const label = match[1].trim();
       const value = match[2].trim();
       pairs.push({ label, value, confidence: 0.8, sourceContext: context });
     }
     
-    // Pattern 3: Boolean-like patterns ("Feature X: Yes/No", "✓ Feature Y", "❌ Feature Z")
-    match = line.match(/^\s*([A-Za-z][^:]{5,40})\s*:\s*(yes|no|true|false|supported|not supported|available|unavailable|✓|❌|✔|✗)\s*$/i);
+    // Pattern 3: Boolean-like patterns ("Feature X: Yes/No", "Feature Y supported")
+    match = line.match(/^\s*([A-Za-z][^:]{5,40})\s*:\s*(yes|no|true|false|supported|not supported|available|unavailable)\s*$/i);
     if (match) {
       const label = match[1].trim();
       const value = match[2].trim();
@@ -98,8 +98,8 @@ function normalizeValueUnit(rawValue: string, unitRules?: any): { value: string 
   
   // Handle boolean values first
   const lowered = original.toLowerCase();
-  const truthy = ["yes", "true", "supported", "available", "enabled", "included", "✓", "✔", "1"];
-  const falsy = ["no", "false", "not supported", "unavailable", "disabled", "not included", "❌", "✗", "0", "—", "-"];
+  const truthy = ["yes", "true", "supported", "available", "enabled", "included", "1"];
+  const falsy = ["no", "false", "not supported", "unavailable", "disabled", "not included", "0", "—", "-"];
   
   if (truthy.some(t => lowered.includes(t))) {
     return { value: true, confidence: 0.9 };
@@ -109,7 +109,7 @@ function normalizeValueUnit(rawValue: string, unitRules?: any): { value: string 
   }
   
   // Handle numeric values with units
-  const numericMatch = original.match(/^[$€£]?(\d+(?:[,.]\d+)?)\s*([a-zA-Z/%]+)?$/);
+  const numericMatch = original.match(/^[\$]?(\d+(?:[,.]\d+)?)\s*([a-zA-Z/%]+)?$/);
   if (numericMatch) {
     let num = parseFloat(numericMatch[1].replace(/,/g, ""));
     let unit = numericMatch[2]?.toLowerCase();
@@ -131,8 +131,14 @@ function normalizeValueUnit(rawValue: string, unitRules?: any): { value: string 
     }
     
     // Handle currency symbols
-    if (original.match(/^[$€£]/)) {
-      unit = original.charAt(0) === '$' ? 'USD' : original.charAt(0) === '€' ? 'EUR' : 'GBP';
+    if (original.match(/^[\$]/)) {
+      unit = 'USD';
+      confidence = 0.9;
+    } else if (original.includes('EUR') || original.includes('euro')) {
+      unit = 'EUR';
+      confidence = 0.9;
+    } else if (original.includes('GBP') || original.includes('pound')) {
+      unit = 'GBP';
       confidence = 0.9;
     }
     
@@ -221,7 +227,7 @@ export const seedSynonymMapV1 = mutation({
         canonicalMetricId: "LATENCY_MS",
         metricLabel: "Latency (ms)",
         synonyms: ["latency", "response time", "rt", "delay", "response latency"],
-        unitRules: { base: "ms", conversions: { "s": 1000, "μs": 0.001 } },
+        unitRules: { base: "ms", conversions: { "s": 1000, "us": 0.001 } },
         priority: 10,
         optimality: "min",
       },
@@ -262,7 +268,7 @@ export const seedSynonymMapV1 = mutation({
         canonicalMetricId: "MONTHLY_PRICE_USD",
         metricLabel: "Monthly Price ($)",
         synonyms: ["price", "pricing", "cost", "monthly cost", "subscription price", "plan price"],
-        unitRules: { base: "USD", conversions: { "€": 1.1, "£": 1.25 } },
+        unitRules: { base: "USD", conversions: { "EUR": 1.1, "GBP": 1.25 } },
         priority: 9,
         optimality: "min",
       },
