@@ -219,7 +219,9 @@ export const getActiveSynonymMapQuery = query({
 
 function mapLabelToCanonical(entries: any[], label: string): { metricId?: string; metricLabel?: string; optimality?: "max" | "min" } {
   if (!entries) return {};
-  const lowered = label.toLowerCase();
+  const lowered = label.toLowerCase().trim();
+  
+  // First try exact matches
   for (const entry of entries) {
     if (entry.metricLabel?.toLowerCase() === lowered) {
       return { metricId: entry.canonicalMetricId, metricLabel: entry.metricLabel, optimality: entry.optimality };
@@ -232,6 +234,19 @@ function mapLabelToCanonical(entries: any[], label: string): { metricId?: string
       }
     }
   }
+  
+  // Then try partial matches (contains)
+  for (const entry of entries) {
+    if (Array.isArray(entry.synonyms)) {
+      for (const s of entry.synonyms) {
+        const synonym = s.toLowerCase();
+        if (lowered.includes(synonym) || synonym.includes(lowered)) {
+          return { metricId: entry.canonicalMetricId, metricLabel: entry.metricLabel, optimality: entry.optimality };
+        }
+      }
+    }
+  }
+  
   return {};
 }
 
@@ -245,15 +260,15 @@ export const seedSynonymMapV1 = mutation({
       {
         canonicalMetricId: "THROUGHPUT_RPS",
         metricLabel: "Throughput (req/s)",
-        synonyms: ["throughput", "req/s", "requests per second", "rps", "requests/sec", "request rate"],
-        unitRules: { base: "rps", conversions: { "requests/sec": 1, "req/min": 0.0167 } },
+        synonyms: ["throughput", "req/s", "requests per second", "rps", "requests/sec", "request rate", "firewall throughput", "firewall throughput (gbps)", "network throughput", "data throughput"],
+        unitRules: { base: "rps", conversions: { "requests/sec": 1, "req/min": 0.0167, "gbps": 1000000000, "mbps": 1000000, "kbps": 1000 } },
         priority: 10,
         optimality: "max",
       },
       {
         canonicalMetricId: "LATENCY_MS",
         metricLabel: "Latency (ms)",
-        synonyms: ["latency", "response time", "rt", "delay", "response latency"],
+        synonyms: ["latency", "response time", "rt", "delay", "response latency", "network latency", "processing delay", "packet delay"],
         unitRules: { base: "ms", conversions: { "s": 1000, "us": 0.001 } },
         priority: 10,
         optimality: "min",
@@ -261,7 +276,7 @@ export const seedSynonymMapV1 = mutation({
       {
         canonicalMetricId: "CONCURRENT_FLAGS",
         metricLabel: "Concurrent Flags",
-        synonyms: ["concurrent flags", "active flags", "flag count", "max flags", "simultaneous flags"],
+        synonyms: ["concurrent flags", "active flags", "flag count", "max flags", "simultaneous flags", "concurrent connections", "max connections", "connection capacity", "concurrent sessions"],
         unitRules: { base: "count" },
         priority: 9,
         optimality: "max",
