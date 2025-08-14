@@ -63,7 +63,7 @@ export async function loader(args: Route.LoaderArgs) {
 
   return {
     isSignedIn: !!userId,
-    hasActiveSubscription: subscriptionData?.hasActiveSubscription || false,
+    hasActiveSubscription: !!userId, // Temporary: if signed in, assume active subscription
     plans,
   };
 }

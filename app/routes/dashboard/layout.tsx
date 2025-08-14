@@ -25,12 +25,8 @@ export async function loader(args: Route.LoaderArgs) {
     secretKey: process.env.CLERK_SECRET_KEY,
   }).users.getUser(userId);
   
-  const subscriptionStatus = { hasActiveSubscription: true }; // Temporary bypass
-
-  // Redirect to subscription-required if no active subscription
-  if (!subscriptionStatus?.hasActiveSubscription) {
-    throw redirect("/subscription-required");
-  }
+  // Temporary bypass: skip subscription check for testing
+  const subscriptionStatus = { hasActiveSubscription: true };
 
   return { user };
 }
