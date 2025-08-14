@@ -1,9 +1,17 @@
 # Processor Service
 
 Micro-servizio che espone `POST /extract` per estrarre `tables`, `text_blocks` e `pages` da un PDF remoto. Usa:
-- pdf-parse per testo digitale
-- Tesseract per OCR (fallback o forzato)
+- pdfjs-dist per testo digitale e analisi strutturale
+- Tesseract per OCR (fallback o forzato) 
+- Poppler-utils (pdftoppm) per rasterizzazione robusta
 - Tabula (tabula-java) per estrazione tabelle
+
+## Robustezza PDF
+Il processor gestisce automaticamente PDF problematici:
+- **PDF corrotti/invalidi**: Fallback a estrazione OCR-only
+- **PDF protetti da password**: Errore esplicito `UNSUPPORTED_PDF`
+- **PDF solo-immagine**: Rilevamento automatico e uso OCR
+- **Strutture PDF non-standard**: Validazione header + fallback robusto
 
 ## Requisiti di sistema
 - Node 20+

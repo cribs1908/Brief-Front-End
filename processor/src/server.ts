@@ -48,6 +48,107 @@ function sanitizeText(s: string): string {
   return normalized.replace(/^\s*page\s*\d+\s*$/gim, "");
 }
 
+function isValidPdfStructure(buffer: Buffer): boolean {
+  // Controlla header PDF
+  if (buffer.length < 8) return false;
+  
+  // PDF deve iniziare con "%PDF-" 
+  const header = buffer.subarray(0, 5).toString('ascii');
+  if (header !== '%PDF-') return false;
+  
+  // Controlla versione (1.0 - 2.0)
+  const version = buffer.subarray(5, 8).toString('ascii');
+  const versionMatch = version.match(/^(\d\.\d)/);
+  if (!versionMatch) return false;
+  
+  const versionNum = parseFloat(versionMatch[1]);
+  if (versionNum < 1.0 || versionNum > 2.0) return false;
+  
+  // Cerca trailer e xref (struttura base PDF)
+  const content = buffer.toString('binary');
+  const hasXref = content.includes('xref') || content.includes('/XRef');
+  const hasTrailer = content.includes('trailer') || content.includes('%%EOF');
+  
+  return hasXref || hasTrailer; // Almeno uno deve essere presente
+}
+
+async function handlePdfWithOcrOnly(inputPath: string, hints: any, logs: string[]): Promise<any> {
+  // Strategia per PDF corrotti: solo OCR, nessuna analisi strutturale
+  logs.push("Using OCR-only strategy for corrupted/invalid PDF");
+  
+  let textBlocks: TextBlock[] = [];
+  let tables: Table[] = [];
+  let pages = 1; // Assumiamo una pagina se non riusciamo a determinarla
+  
+  try {
+    // Strategia 1: Prova pdftoppm per rasterizzare
+    const images = await rasterizePdfToImages(inputPath, 1, hints?.max_pages || 10);
+    pages = images.length || 1;
+    
+    for (let i = 0; i < images.length; i++) {
+      const imgPath = images[i];
+      try {
+        const txt = await runTesseractOnImage(imgPath, hints?.expected_language);
+        const clean = sanitizeText(txt);
+        if (clean.trim().length > 1) {
+          textBlocks.push({ page: i + 1, text: clean });
+        }
+        logs.push(`OCR p${i + 1}: extracted ${clean.length} chars`);
+      } catch (ocrErr) {
+        logs.push(`OCR p${i + 1}: failed - ${String(ocrErr)}`);
+      }
+      
+      // Cleanup immagine temporanea
+      try { await fs.unlink(imgPath); } catch {}
+    }
+  } catch (rasterError: any) {
+    logs.push(`pdftoppm failed: ${rasterError?.message || String(rasterError)}`);
+    
+    // Strategia 2: Prova tesseract diretto su PDF (limitato ma può funzionare)
+    try {
+      const txt = await runTesseractOnImage(inputPath, hints?.expected_language);
+      const clean = sanitizeText(txt);
+      if (clean.trim().length > 1) {
+        textBlocks.push({ page: 1, text: clean });
+        logs.push(`Direct OCR: extracted ${clean.length} chars`);
+      } else {
+        logs.push("Direct OCR: no readable text found");
+      }
+    } catch (directOcrErr) {
+      logs.push(`Direct OCR failed: ${String(directOcrErr)}`);
+      // Se tutto fallisce, restituisci almeno un messaggio informativo
+      textBlocks.push({ 
+        page: 1, 
+        text: "PDF extraction failed: File appears to be corrupted or contains only non-extractable content." 
+      });
+    }
+  }
+  
+  // Tabula può ancora funzionare anche con PDF "corrotti" se ha struttura tabellare valida
+  try {
+    const pageSpec = hints?.max_pages ? `1-${hints.max_pages}` : "all";
+    tables = await runTabulaTables(inputPath, pageSpec);
+    if (tables.length > 0) {
+      logs.push(`Tabula extracted ${tables.length} tables despite PDF structure issues`);
+    }
+  } catch (tabulaErr: any) {
+    logs.push(`Tabula failed on corrupted PDF: ${tabulaErr?.message || String(tabulaErr)}`);
+  }
+  
+  // Calcola qualità basata su OCR recovery
+  const totalText = textBlocks.reduce((sum, block) => sum + block.text.length, 0);
+  const quality = Math.min(1, Math.max(0.1, (totalText / 500) * 0.6 + (tables.length > 0 ? 0.4 : 0)));
+  
+  return {
+    pages,
+    ocr_used: true,
+    extraction_quality: Number(quality.toFixed(2)),
+    tables,
+    text_blocks: textBlocks,
+    logs: logs.slice(-15), // Ultimi 15 log per debugging
+  };
+}
+
 function validateUrl(url: string) {
   try {
     const u = new URL(url);
@@ -224,10 +325,44 @@ app.post("/extract", async (req, res) => {
     tmp = tmpPath;
 
     const pdfBuf = await fs.readFile(tmpPath);
+    
+    // Validazione base della struttura PDF
+    if (!isValidPdfStructure(pdfBuf)) {
+      throw { code: "UNSUPPORTED_PDF", message: "Invalid PDF structure or corrupted file" };
+    }
+    
     // Disabilita il worker in ambiente Node
     try { ((pdfjsLib as any).GlobalWorkerOptions ||= {}).workerSrc = undefined; } catch {}
-    const loadingTask = (pdfjsLib as any).getDocument({ data: new Uint8Array(pdfBuf) });
-    const doc = await loadingTask.promise;
+    
+    let doc;
+    try {
+      const loadingTask = (pdfjsLib as any).getDocument({ 
+        data: new Uint8Array(pdfBuf),
+        // Opzioni per gestire PDF problematici
+        stopAtErrors: false,
+        maxImageSize: 1024 * 1024 * 10, // 10MB max per singola immagine
+        isEvalSupported: false,
+        fontExtraProperties: false
+      });
+      doc = await loadingTask.promise;
+    } catch (pdfError: any) {
+      logs.push(`PDF.js loading failed: ${pdfError?.message || String(pdfError)}`);
+      
+      // Categorizza l'errore PDF.js per fallback appropriato
+      if (pdfError?.message?.includes("Invalid PDF structure") || 
+          pdfError?.message?.includes("Invalid or corrupted PDF") ||
+          pdfError?.message?.includes("PDF header not found") ||
+          pdfError?.name === "InvalidPDFException") {
+        // Fallback: prova solo OCR senza analisi strutturale
+        logs.push("PDF structure invalid, attempting OCR-only extraction");
+        return await handlePdfWithOcrOnly(tmpPath, hints, logs);
+      } else if (pdfError?.message?.includes("password") || 
+                 pdfError?.message?.includes("encrypted")) {
+        throw { code: "UNSUPPORTED_PDF", message: "PDF is password-protected" };
+      } else {
+        throw { code: "UNSUPPORTED_PDF", message: `PDF loading failed: ${pdfError?.message || "Unknown error"}` };
+      }
+    }
     const pages = doc.numPages || 0;
     const maxPages = hints?.max_pages && pages ? Math.min(hints.max_pages, pages) : pages;
 

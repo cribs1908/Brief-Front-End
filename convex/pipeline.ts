@@ -36,6 +36,31 @@ async function processPdfViaProcessor(uri: string): Promise<{ tables: any[]; tex
     if (!res.ok) {
       const errorText = await res.text();
       console.log("DEBUG: Railway processor error response:", errorText);
+      
+      // Handle specific error cases gracefully
+      if (res.status === 400 || res.status === 413) {
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { message: errorText };
+        }
+        
+        console.log("DEBUG: Processor returned error:", errorData);
+        
+        if (errorData.code === "UNSUPPORTED_PDF" || errorText.includes("Invalid PDF structure")) {
+          console.log("DEBUG: PDF unsupported/invalid, falling back to error extraction");
+          return { 
+            tables: [], 
+            textBlocks: [{ 
+              id: 0, 
+              text: `PDF extraction failed: ${errorData.message || "Invalid PDF structure"}. File may be corrupted, password-protected, or incompatible format.` 
+            }],
+            pages: 1 
+          };
+        }
+      }
+      
       throw new Error(`Processor error ${res.status}: ${errorText}`);
     }
     
