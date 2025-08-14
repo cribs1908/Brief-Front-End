@@ -192,7 +192,7 @@ function buildMockTable(files: ComparisonFile[], synonyms: SynonymsMap): Compari
 }
 
 // --- Backend integration (Convex HTTP) ---
-const API_BASE: string = (import.meta as any).env?.VITE_CONVEX_URL || "";
+const API_BASE: string = (import.meta as any).env?.VITE_CONVEX_HTTP_URL || (import.meta as any).env?.VITE_CONVEX_URL || "";
 const DISABLE_MOCKS: boolean = ((import.meta as any).env?.VITE_DISABLE_MOCKS || "true").toString() === "true";
 
 async function getUploadUrl(): Promise<string> {
