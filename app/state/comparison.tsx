@@ -342,6 +342,13 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
   // persist
   React.useEffect(() => setPersisted(state), [state, setPersisted]);
 
+  // Reset automatico di uno stato "in corso" rimasto appeso da sessioni precedenti
+  React.useEffect(() => {
+    if (state.processing.running) {
+      dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
+    }
+  }, []);
+
   const addFiles = useCallback(async (input: FileList | File[]) => {
     const list = Array.from(input as any as File[]);
     const next = list.map((f) => {
@@ -399,6 +406,11 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
 
   const startProcessing = useCallback(async () => {
     if (state.files.length < 2) return;
+    if (!API_BASE) {
+      console.error("API_BASE non configurato (VITE_CONVEX_HTTP_URL / VITE_CONVEX_URL)");
+      dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
+      return;
+    }
     
     // Check if all files have been uploaded
     const unuploadedFiles = state.files.filter(f => !f.storageId || f.uploading);
