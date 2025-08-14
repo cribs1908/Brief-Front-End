@@ -595,6 +595,7 @@ export const processAllDocumentsForJob = action({
       await ctx.runMutation(api.pipeline.patchJob as any, { jobId: args.jobId, updatedAt: now(), progress: { total: extractionJobs.length, completed, stage: "extracting" } });
     }
 
+    // Esegui aggregazione anche se nessuna metrica estratta: produrre dataset vuoto evita loop lato FE
     await ctx.runAction(api.pipeline.aggregateJob, { jobId: args.jobId });
     const finalStatus = failures > 0 && completed > 0 ? "ready_partial" : failures === extractionJobs.length ? "failed_no_signal" : "ready";
     await ctx.runMutation(api.pipeline.patchJob as any, { jobId: args.jobId, status: finalStatus, updatedAt: now() });
@@ -827,7 +828,19 @@ export const getComparisonDataset = query({
   args: { jobId: v.id("comparisonJobs") },
   handler: async (ctx, args) => {
     const artifact = await ctx.db.query("comparisonArtifacts").withIndex("by_job", q => q.eq("jobId", args.jobId)).first();
-    return artifact?.data || null;
+    // Se non esiste ancora il dataset, restituiamo struttura vuota coerente con PRD per evitare errori FE
+    if (!artifact?.data) {
+      return {
+        vendors: [],
+        metrics: [],
+        matrix: {},
+        deltas: {},
+        best_vendor_by_metric: {},
+        missing_flags: {},
+        synonym_map_version: undefined,
+      };
+    }
+    return artifact.data;
   },
 });
 

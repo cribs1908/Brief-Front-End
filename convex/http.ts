@@ -13,6 +13,13 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     const body = await req.json();
     const result = await ctx.runAction(api.pipeline.createComparisonJob, body);
+    // Trigger immediatamente l'elaborazione in background oltre allo scheduler (failsafe anti-loop)
+    try {
+      // Non attendiamo il completamento per non bloccare la risposta HTTP
+      void ctx.runAction(api.pipeline.processAllDocumentsForJob as any, { jobId: result.job_id as any });
+    } catch (e) {
+      // non bloccare: lo scheduler provvederà
+    }
     return new Response(JSON.stringify(result), {
       status: 200,
       headers: {
