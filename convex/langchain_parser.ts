@@ -26,21 +26,41 @@ const MetricCandidatesArraySchema = z.array(MetricCandidateSchema);
 // Create structured output parser
 const outputParser = StructuredOutputParser.fromZodSchema(MetricCandidatesArraySchema);
 
-// LangChain prompt for semantic parsing with format instructions
+// Enhanced LangChain prompt for aggressive B2B technical document extraction
 const SEMANTIC_PARSING_PROMPT = PromptTemplate.fromTemplate(`
-You are an expert at extracting structured metrics from technical PDF documents (datasheets, spec sheets, pricing pages).
+You are an expert at extracting structured metrics from B2B technical PDF documents (datasheets, spec sheets, API documentation, SaaS pricing pages, security compliance docs).
 
-Given the following text blocks from a PDF document, extract all measurable metrics, features, and specifications.
+Your task is to extract ALL possible measurable metrics, specifications, and features from the provided text. Be COMPREHENSIVE and AGGRESSIVE in your extraction - don't miss anything that could be useful for B2B procurement decisions.
 
-Focus on:
-1. Performance metrics (throughput, latency, response time, etc.)
-2. Pricing information (costs, plans, pricing tiers)
-3. Compliance features (SOC2, GDPR, certifications)
-4. Technical limits (max users, concurrent connections, etc.)
-5. Support metrics (SLA, response times)
+CRITICAL INSTRUCTIONS:
+1. Extract EVERYTHING that looks like a metric, specification, limit, or feature
+2. Look for numbers, percentages, yes/no answers, technical capabilities
+3. Don't be conservative - if something might be a metric, include it
+4. Pay special attention to tables, bullet points, and structured data
+5. For missing or unclear values, still extract the metric with a confidence < 0.7
+
+TARGET METRICS TO PRIORITIZE:
+- Performance: throughput (req/s, RPS, TPS), latency (ms), response time, concurrent users/connections
+- Scalability: max users, environments, API calls, storage limits, bandwidth
+- Pricing: monthly cost, per-user pricing, tiers, usage-based rates
+- Compliance: SOC2, GDPR, HIPAA, ISO certifications, audit logs, SSO/SAML
+- Support: SLA uptime %, response time, support tiers, availability
+- Technical: API rate limits, data retention, backup frequency, regions
+- Features: integrations, SDKs, languages supported, deployment options
+
+EXAMPLES OF WHAT TO EXTRACT:
+- "99.9% uptime SLA" → label: "Uptime SLA", value: 99.9, unit: "percent"
+- "Supports up to 10,000 concurrent users" → label: "Concurrent Users", value: 10000
+- "Response time under 200ms" → label: "Response Time", value: 200, unit: "ms"
+- "SOC2 Type II compliant" → label: "SOC2 Compliance", value: true
+- "Starting at $99/month" → label: "Monthly Price", value: 99, unit: "USD"
+- "GDPR compliant: Yes" → label: "GDPR Compliance", value: true
+- "API rate limit: 1000 calls/hour" → label: "API Rate Limit", value: 1000, unit: "calls/hour"
 
 Text to analyze:
 {text}
+
+IMPORTANT: Extract as many metrics as possible. This data will be used for B2B procurement comparisons where completeness is critical.
 
 {format_instructions}
 `);
@@ -128,7 +148,7 @@ export async function extractMetricCandidates(
 }
 
 /**
- * Pattern-based extraction as fallback (existing logic)
+ * Enhanced pattern-based extraction with aggressive B2B-focused patterns
  */
 function extractWithPatterns(textBlocks: Array<{ text: string; page?: number }>): MetricCandidate[] {
   const pairs: MetricCandidate[] = [];
@@ -144,12 +164,12 @@ function extractWithPatterns(textBlocks: Array<{ text: string; page?: number }>)
     
     for (const line of lines) {
       const trimmed = line.trim();
-      if (trimmed.length < 5) continue;
+      if (trimmed.length < 3) continue; // Allow shorter matches
       
       let match;
       
       // Pattern 1: Colon-separated (e.g., "Price: $99", "Latency: 50ms")
-      match = trimmed.match(/^\s*([A-Za-z][^:]{4,40})\s*:\s*(.{1,100})\s*$/);
+      match = trimmed.match(/^\s*([A-Za-z][^:]{2,50})\s*:\s*(.{1,200})\s*$/);
       if (match) {
         const label = match[1].trim();
         const value = parseValue(match[2].trim());
@@ -164,8 +184,8 @@ function extractWithPatterns(textBlocks: Array<{ text: string; page?: number }>)
         continue;
       }
       
-      // Pattern 2: Numeric with units (e.g., "Throughput 1000 req/s")
-      match = trimmed.match(/^\s*([A-Za-z][^0-9]{4,40})\s+(\d+[.,]?\d*\s*[a-zA-Z/%]+)\s*$/);
+      // Pattern 2: Numeric with units (e.g., "Throughput 1000 req/s", "Max users 50000")
+      match = trimmed.match(/^\s*([A-Za-z][^0-9]{2,50})\s+(\d+[.,]?\d*\s*[a-zA-Z/%\-]+)\s*$/);
       if (match) {
         const label = match[1].trim();
         const value = parseValue(match[2].trim());
@@ -173,6 +193,71 @@ function extractWithPatterns(textBlocks: Array<{ text: string; page?: number }>)
           label,
           value: value.value,
           unit: value.unit,
+          confidence: 0.85,
+          sourceContext: trimmed,
+          pageRef: block.page,
+        });
+        continue;
+      }
+      
+      // Pattern 3: Percentage values (e.g., "Uptime 99.9%", "SLA: 99.99%")
+      match = trimmed.match(/([A-Za-z][^0-9]{2,30})\s*:?\s*(\d+(?:\.\d+)?%)/);
+      if (match) {
+        const label = match[1].trim();
+        const value = parseFloat(match[2].replace('%', ''));
+        pairs.push({
+          label,
+          value,
+          unit: 'percent',
+          confidence: 0.9,
+          sourceContext: trimmed,
+          pageRef: block.page,
+        });
+        continue;
+      }
+      
+      // Pattern 4: Boolean/compliance patterns (e.g., "SOC2: Yes", "GDPR compliant")
+      match = trimmed.match(/([A-Za-z][^:]{2,30})\s*:?\s*(Yes|No|True|False|Supported|Not supported|Available|Unavailable|Compliant|✓|✗|−)/i);
+      if (match) {
+        const label = match[1].trim();
+        const rawValue = match[2].trim().toLowerCase();
+        const value = ['yes', 'true', 'supported', 'available', 'compliant', '✓'].includes(rawValue);
+        pairs.push({
+          label,
+          value,
+          confidence: 0.9,
+          sourceContext: trimmed,
+          pageRef: block.page,
+        });
+        continue;
+      }
+      
+      // Pattern 5: "Up to X" pattern (e.g., "Up to 10,000 users", "Supports up to 1000 environments")
+      match = trimmed.match(/(Up to|Supports up to|Maximum|Max)\s+(\d+[,.]?\d*)\s*([A-Za-z\s]+)/i);
+      if (match) {
+        const metricName = match[3].trim();
+        const value = parseFloat(match[2].replace(/,/g, ''));
+        pairs.push({
+          label: `Max ${metricName}`,
+          value,
+          confidence: 0.85,
+          sourceContext: trimmed,
+          pageRef: block.page,
+        });
+        continue;
+      }
+      
+      // Pattern 6: Currency patterns (e.g., "$99/month", "€199 per user")
+      match = trimmed.match(/([A-Za-z][^$€£]{2,30})\s*:?\s*([$€£]\d+[.,]?\d*)\s*([\/\s]?(month|user|year|annual)?)?/);
+      if (match) {
+        const label = match[1].trim();
+        const currencyValue = match[2];
+        const period = match[4] || '';
+        const value = parseFloat(currencyValue.replace(/[$€£,]/g, ''));
+        pairs.push({
+          label: period ? `${label} (${period})` : label,
+          value,
+          unit: currencyValue[0] === '$' ? 'USD' : currencyValue[0] === '€' ? 'EUR' : 'GBP',
           confidence: 0.85,
           sourceContext: trimmed,
           pageRef: block.page,

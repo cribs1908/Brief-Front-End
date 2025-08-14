@@ -119,6 +119,58 @@ function toTitleCaseVendor(fileName: string): string {
 
 const MIN_IS_BETTER = new Set(["Monthly Price ($)", "Support Response (hrs)"]);
 
+// Dynamic category inference based on metric label/name
+function inferCategoryFromLabel(label: string): string {
+  const lowerLabel = label.toLowerCase();
+  
+  // Performance metrics
+  if (lowerLabel.includes("throughput") || lowerLabel.includes("req/s") || lowerLabel.includes("rps") ||
+      lowerLabel.includes("latency") || lowerLabel.includes("response time") || lowerLabel.includes("ms") ||
+      lowerLabel.includes("concurrent") || lowerLabel.includes("performance") || lowerLabel.includes("speed") ||
+      lowerLabel.includes("bandwidth") || lowerLabel.includes("evaluations") || lowerLabel.includes("tps")) {
+    return "Performance";
+  }
+  
+  // Pricing metrics  
+  if (lowerLabel.includes("price") || lowerLabel.includes("cost") || lowerLabel.includes("$") ||
+      lowerLabel.includes("pricing") || lowerLabel.includes("monthly") || lowerLabel.includes("annual") ||
+      lowerLabel.includes("per user") || lowerLabel.includes("tier") || lowerLabel.includes("plan")) {
+    return "Pricing";
+  }
+  
+  // Compliance & Security
+  if (lowerLabel.includes("soc2") || lowerLabel.includes("gdpr") || lowerLabel.includes("hipaa") ||
+      lowerLabel.includes("iso") || lowerLabel.includes("compliance") || lowerLabel.includes("security") ||
+      lowerLabel.includes("audit") || lowerLabel.includes("sso") || lowerLabel.includes("saml") ||
+      lowerLabel.includes("encryption") || lowerLabel.includes("certification")) {
+    return "Compliance";
+  }
+  
+  // Support & SLA
+  if (lowerLabel.includes("support") || lowerLabel.includes("sla") || lowerLabel.includes("uptime") ||
+      lowerLabel.includes("availability") || lowerLabel.includes("response") && lowerLabel.includes("hours") ||
+      lowerLabel.includes("maintenance") || lowerLabel.includes("help")) {
+    return "Supporto";
+  }
+  
+  // SDK & Integration
+  if (lowerLabel.includes("sdk") || lowerLabel.includes("api") || lowerLabel.includes("integration") ||
+      lowerLabel.includes("languages") || lowerLabel.includes("library") || lowerLabel.includes("framework") ||
+      lowerLabel.includes("webhook") || lowerLabel.includes("endpoint")) {
+    return "SDK";
+  }
+  
+  // Limits & Capacity
+  if (lowerLabel.includes("limit") || lowerLabel.includes("max") || lowerLabel.includes("capacity") ||
+      lowerLabel.includes("users") || lowerLabel.includes("environments") || lowerLabel.includes("storage") ||
+      lowerLabel.includes("retention") || lowerLabel.includes("seats")) {
+    return "Performance"; // Group with performance for limits
+  }
+  
+  // Default fallback
+  return "Performance";
+}
+
 function buildMockTable(files: ComparisonFile[], synonyms: SynonymsMap): ComparisonTable {
   const vendors = files.map((f) => f.vendorName?.trim() || toTitleCaseVendor(f.name));
   const columns = ["Metrica", ...vendors];
@@ -241,7 +293,10 @@ function buildTableFromDataset(ds: BackendDataset): ComparisonTable {
       : values.every((v) => typeof v === "boolean" || v === null)
       ? "boolean"
       : "text";
-    return { key: m.label, category: "Performance", type, values };
+    
+    // Dynamic category assignment based on metric label/type
+    const category = inferCategoryFromLabel(m.label);
+    return { key: m.label, category, type, values };
   });
   return { columns, vendorMeta, rows, sort: null, filters: defaultFilters, pinnedKeys: [] };
 }
