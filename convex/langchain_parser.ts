@@ -81,10 +81,12 @@ export async function parseMetricsWithLangChain(
   try {
     // Initialize LangChain components
     const llm = new ChatOpenAI({
-      openAIApiKey: openaiApiKey,
-      modelName: "gpt-4o-mini", // Fast and cost-effective for structured extraction
-      temperature: 0, // Deterministic output for consistent results
-    });
+      apiKey: openaiApiKey,
+      model: "gpt-4o-mini",
+      temperature: 0,
+      maxTokens: 1500,
+      timeout: 60000,
+    } as any);
 
     // Combine text blocks into structured input
     const combinedText = textBlocks

@@ -74,7 +74,7 @@ async function handlePdfWithOcrOnly(inputPath: string, hints: any, logs: string[
   
   try {
     // Strategia 1: Prova pdftoppm per rasterizzare
-    const maxPages = Math.min(hints?.max_pages || 6, 20);
+    const maxPages = Math.min(hints?.max_pages || 4, 12);
     const images = await rasterizePdfToImages(inputPath, 1, maxPages);
     pages = images.length || 1;
     
@@ -232,7 +232,7 @@ async function rasterizePdfToImages(inputPath: string, fromPage = 1, toPage?: nu
     const prefix = join(tmpdir(), `raster_${Date.now()}_${Math.random().toString(36).slice(2)}`);
     const args = ["-png", "-f", String(fromPage)];
     if (toPage) args.push("-l", String(toPage));
-    args.push("-r", "300", inputPath, prefix); // 300 DPI per miglior OCR
+    args.push("-r", "200", inputPath, prefix); // 200 DPI: più leggero e stabile su hosting limitati
     const proc = spawn("pdftoppm", args, { stdio: ["ignore", "inherit", "pipe"] });
     let err = "";
     const to = setTimeout(() => {
