@@ -5,7 +5,7 @@
 
 import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
-import { StringOutputParser } from "@langchain/core/output_parsers";
+import { StructuredOutputParser } from "langchain/output_parsers";
 import { z } from "zod";
 
 // Schema for extracted metrics
@@ -20,7 +20,13 @@ const MetricCandidateSchema = z.object({
 
 export type MetricCandidate = z.infer<typeof MetricCandidateSchema>;
 
-// LangChain prompt for semantic parsing
+// Schema for array of metrics
+const MetricCandidatesArraySchema = z.array(MetricCandidateSchema);
+
+// Create structured output parser
+const outputParser = StructuredOutputParser.fromZodSchema(MetricCandidatesArraySchema);
+
+// LangChain prompt for semantic parsing with format instructions
 const SEMANTIC_PARSING_PROMPT = PromptTemplate.fromTemplate(`
 You are an expert at extracting structured metrics from technical PDF documents (datasheets, spec sheets, pricing pages).
 
@@ -36,35 +42,7 @@ Focus on:
 Text to analyze:
 {text}
 
-For each metric found, provide:
-- label: The descriptive name/label for this metric
-- value: The actual value (number, boolean, or string)
-- unit: Unit of measurement if applicable (ms, $, %, count, etc.)
-- confidence: Your confidence in this extraction (0.0 to 1.0)
-- sourceContext: The original text snippet containing this metric
-- pageRef: Page number if mentioned
-
-Return ONLY a valid JSON array of metric objects. No explanations.
-
-Example format:
-[
-  {
-    "label": "Monthly Price",
-    "value": 99,
-    "unit": "USD",
-    "confidence": 0.95,
-    "sourceContext": "Enterprise Plan: $99/month",
-    "pageRef": 2
-  },
-  {
-    "label": "SOC2 Compliance",
-    "value": true,
-    "unit": "boolean",
-    "confidence": 0.9,
-    "sourceContext": "SOC2 Type II certified",
-    "pageRef": 1
-  }
-]
+{format_instructions}
 `);
 
 /**
@@ -88,38 +66,26 @@ export async function parseMetricsWithLangChain(
       temperature: 0, // Deterministic output for consistent results
     });
 
-    const outputParser = new StringOutputParser();
-    const chain = SEMANTIC_PARSING_PROMPT.pipe(llm).pipe(outputParser);
-
     // Combine text blocks into structured input
     const combinedText = textBlocks
       .map((block, idx) => `Page ${block.page || idx + 1}:\n${block.text}`)
       .join("\n\n---\n\n");
 
-    // Run LangChain extraction
-    const response = await chain.invoke({ text: combinedText });
+    console.log("DEBUG: Sending to LangChain:", combinedText.substring(0, 500));
 
-    // Parse and validate the response
-    let parsedMetrics: any[];
-    try {
-      parsedMetrics = JSON.parse(response);
-    } catch (parseError) {
-      console.error("Failed to parse LangChain response as JSON:", response);
-      return [];
-    }
+    // Create chain with structured output parser
+    const chain = SEMANTIC_PARSING_PROMPT.pipe(llm).pipe(outputParser);
 
-    // Validate each metric against our schema
-    const validatedMetrics: MetricCandidate[] = [];
-    for (const metric of parsedMetrics) {
-      try {
-        const validated = MetricCandidateSchema.parse(metric);
-        validatedMetrics.push(validated);
-      } catch (validationError) {
-        console.warn("Invalid metric format from LangChain:", metric, validationError);
-      }
-    }
+    // Run LangChain extraction with format instructions
+    const response = await chain.invoke({ 
+      text: combinedText,
+      format_instructions: outputParser.getFormatInstructions()
+    });
 
-    return validatedMetrics;
+    console.log("DEBUG: LangChain response:", response);
+
+    // Response is already parsed by StructuredOutputParser
+    return response;
   } catch (error) {
     console.error("LangChain semantic parsing failed:", error);
     return [];
@@ -166,6 +132,12 @@ export async function extractMetricCandidates(
  */
 function extractWithPatterns(textBlocks: Array<{ text: string; page?: number }>): MetricCandidate[] {
   const pairs: MetricCandidate[] = [];
+  
+  // Debug: log what text we're receiving
+  console.log("DEBUG: Received text blocks:", textBlocks.length, "blocks");
+  textBlocks.forEach((block, i) => {
+    console.log(`Block ${i}:`, block.text.substring(0, 200));
+  });
   
   for (const block of textBlocks) {
     const lines = block.text.split('\n').filter(line => line.trim().length > 0);
