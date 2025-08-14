@@ -73,65 +73,148 @@ export const processPdfDirect = action({
 });
 
 /**
- * Simplified text extraction for serverless environment
- * Uses basic PDF parsing without external dependencies
+ * Improved text extraction using PDF.js (serverless compatible)
+ * Handles text extraction properly and respects Convex size limits
  */
 async function extractTextFromPdf(pdfBuffer: ArrayBuffer): Promise<TextBlock[]> {
   const textBlocks: TextBlock[] = [];
   
   try {
-    // Convert ArrayBuffer to string for basic text search
-    const uint8Array = new Uint8Array(pdfBuffer);
-    let pdfText = '';
-    
-    // Basic text extraction - look for text streams in PDF
-    // This is a simplified approach that works for many PDFs
-    for (let i = 0; i < uint8Array.length - 10; i++) {
-      const char = uint8Array[i];
-      // Look for readable ASCII text
-      if (char >= 32 && char <= 126) {
-        pdfText += String.fromCharCode(char);
-      } else if (char === 10 || char === 13) { // newlines
-        pdfText += '\n';
+    // Try PDF.js for proper text extraction first
+    try {
+      const pdfjs = await import('pdfjs-dist');
+      
+      // Configure PDF.js for serverless  
+      (pdfjs as any).GlobalWorkerOptions = (pdfjs as any).GlobalWorkerOptions || {};
+      (pdfjs as any).GlobalWorkerOptions.workerSrc = null;
+      
+      const loadingTask = pdfjs.getDocument({
+        data: pdfBuffer,
+        verbosity: 0,
+        standardFontDataUrl: undefined,
+        cMapUrl: undefined,
+        cMapPacked: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+        disableFontFace: true,
+        useWorkerFetch: false,
+        disableRange: true,
+        disableStream: true,
+      });
+      
+      const pdf = await loadingTask.promise;
+      console.log(`PDF loaded: ${pdf.numPages} pages`);
+      
+      // Extract text from first 5 pages max (prevent size issues)
+      const maxPages = Math.min(pdf.numPages, 5);
+      
+      for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+        try {
+          const page = await pdf.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          
+          const pageText = textContent.items
+            .map((item: any) => item.str || '')
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          
+          if (pageText && pageText.length > 10) {
+            // Limit text per page to 1500 chars to prevent size issues
+            const limitedText = pageText.length > 1500 ? pageText.substring(0, 1500) + '...' : pageText;
+            textBlocks.push({
+              page: pageNum,
+              text: limitedText
+            });
+          }
+          
+          page.cleanup();
+        } catch (pageError) {
+          console.warn(`Failed to extract page ${pageNum}:`, pageError);
+          textBlocks.push({
+            page: pageNum,
+            text: `Page ${pageNum}: Text extraction failed - ${pageError instanceof Error ? pageError.message : 'Unknown error'}`
+          });
+        }
       }
-    }
-    
-    // Clean up the extracted text
-    const cleanText = pdfText
-      .replace(/[^\x20-\x7E\n]/g, ' ') // Remove non-printable chars
-      .replace(/\s+/g, ' ') // Normalize whitespace
-      .replace(/\n\s+/g, '\n') // Clean up line breaks
-      .trim();
-    
-    if (cleanText && cleanText.length > 50) {
-      // Split into manageable chunks
-      const chunks = cleanText.match(/.{1,2000}/g) || [cleanText];
+      
+      pdf.destroy();
+      
+    } catch (pdfjsError) {
+      console.warn("PDF.js extraction failed, falling back to basic method:", pdfjsError);
+      
+      // Fallback: basic text extraction (improved)
+      const uint8Array = new Uint8Array(pdfBuffer);
+      const chunks: string[] = [];
+      let currentChunk = '';
+      
+      // Look for text patterns in PDF
+      for (let i = 0; i < Math.min(uint8Array.length, 500000); i++) { // Limit to first 500KB
+        const char = uint8Array[i];
+        
+        // Only collect printable ASCII and spaces
+        if ((char >= 32 && char <= 126) || char === 10 || char === 13) {
+          currentChunk += String.fromCharCode(char);
+          
+          // Split into chunks to prevent memory issues
+          if (currentChunk.length > 2000) {
+            chunks.push(currentChunk);
+            currentChunk = '';
+          }
+        }
+      }
+      
+      if (currentChunk) chunks.push(currentChunk);
+      
+      // Process chunks into text blocks
       chunks.forEach((chunk, index) => {
-        if (chunk.trim().length > 20) {
+        const cleanText = chunk
+          .replace(/[^\x20-\x7E\n]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .replace(/(.)\1{10,}/g, '$1') // Remove repeated chars
+          .trim();
+        
+        if (cleanText.length > 20) {
           textBlocks.push({
             page: index + 1,
-            text: chunk.trim()
+            text: cleanText.substring(0, 1000) // Limit each block
           });
         }
       });
     }
     
-    // If no text found, create a minimal block
-    if (textBlocks.length === 0) {
+    // If no meaningful text found
+    if (textBlocks.length === 0 || textBlocks.every(b => b.text.length < 20)) {
+      textBlocks.splice(0); // Clear array
       textBlocks.push({
         page: 1,
-        text: "PDF content could not be extracted as readable text. The file may contain images, be password-protected, or use an unsupported format."
+        text: "PDF appears to contain primarily images or uses unsupported text encoding. Consider using a different PDF or ensuring it contains searchable text."
+      });
+    }
+    
+    // Final safety check - limit total size
+    let totalSize = textBlocks.reduce((sum, block) => sum + block.text.length, 0);
+    if (totalSize > 50000) { // 50KB text limit
+      console.warn(`Text too large (${totalSize} chars), truncating...`);
+      let accumulated = 0;
+      textBlocks.forEach(block => {
+        if (accumulated + block.text.length > 50000) {
+          block.text = block.text.substring(0, Math.max(0, 50000 - accumulated)) + '...';
+        }
+        accumulated += block.text.length;
       });
     }
     
   } catch (error) {
-    console.error("Text extraction failed:", error);
+    console.error("PDF text extraction completely failed:", error);
+    textBlocks.splice(0);
     textBlocks.push({
       page: 1, 
-      text: `Text extraction error: ${error instanceof Error ? error.message : 'Unknown error'}`
+      text: `PDF processing error: ${error instanceof Error ? error.message : 'Unknown error'}. This PDF may be corrupted or use an unsupported format.`
     });
   }
   
+  console.log(`Final extraction: ${textBlocks.length} blocks, total chars: ${textBlocks.reduce((sum, b) => sum + b.text.length, 0)}`);
   return textBlocks;
 }
 

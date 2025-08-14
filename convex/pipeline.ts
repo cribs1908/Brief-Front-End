@@ -10,6 +10,73 @@ type PdfSpec = { uri: string; vendor_hint?: string | null };
 // Helpers
 const now = () => Date.now();
 
+// Chunking functions to respect Convex size limits
+function chunkTextBlocks(textBlocks: any[], maxSizeBytes: number): any[] {
+  if (!textBlocks || textBlocks.length === 0) return [];
+  
+  const chunks: any[] = [];
+  let currentChunk: any[] = [];
+  let currentSize = 0;
+  
+  for (const block of textBlocks) {
+    const blockSize = JSON.stringify(block).length;
+    
+    // If single block is too large, truncate it
+    if (blockSize > maxSizeBytes) {
+      const truncatedBlock = {
+        ...block,
+        text: block.text?.substring(0, Math.floor(maxSizeBytes / 2)) + '...[truncated]'
+      };
+      chunks.push([truncatedBlock]);
+      continue;
+    }
+    
+    // If adding this block would exceed limit, start new chunk
+    if (currentSize + blockSize > maxSizeBytes && currentChunk.length > 0) {
+      chunks.push([...currentChunk]);
+      currentChunk = [block];
+      currentSize = blockSize;
+    } else {
+      currentChunk.push(block);
+      currentSize += blockSize;
+    }
+  }
+  
+  // Add final chunk if not empty
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+  
+  // Flatten chunks for compatibility
+  return chunks.flat();
+}
+
+function chunkTables(tables: any[], maxSizeBytes: number): any[] {
+  if (!tables || tables.length === 0) return [];
+  
+  const chunks: any[] = [];
+  
+  for (const table of tables) {
+    const tableSize = JSON.stringify(table).length;
+    
+    // If table is too large, limit its rows
+    if (tableSize > maxSizeBytes) {
+      const maxRows = Math.floor((table.rows?.length || 0) * 0.3); // Keep 30% of rows
+      const truncatedTable = {
+        ...table,
+        rows: (table.rows || []).slice(0, maxRows),
+        truncated: true,
+        originalRowCount: table.rows?.length || 0
+      };
+      chunks.push(truncatedTable);
+    } else {
+      chunks.push(table);
+    }
+  }
+  
+  return chunks;
+}
+
 async function processPdfDirect(ctx: any, storageId: string): Promise<{ tables: any[]; textBlocks: Array<{ id: number; text: string }>; pages?: number }> {
   try {
     console.log("DEBUG: Processing PDF directly in Convex");
@@ -594,11 +661,17 @@ export const processExtractionJob = action({
       const tables: any[] = processed.tables;
       const textBlocks = processed.textBlocks;
 
+      // Chunk data to respect Convex 1MB limit
+      const chunkedTextBlocks = chunkTextBlocks(textBlocks, 800000); // 800KB limit for safety
+      const chunkedTables = chunkTables(tables, 100000); // 100KB limit for tables
+      
+      console.log(`DEBUG: Chunked ${textBlocks.length} blocks into ${chunkedTextBlocks.length} chunks, ${tables.length} tables into ${chunkedTables.length} chunks`);
+      
       await ctx.runMutation(api.pipeline.insertRawExtraction, {
         documentId: (document as any)._id as Id<"documents">,
-        tables,
-        textBlocks,
-        extractionQuality: Math.min(1, textBlocks.length / 10),
+        tables: chunkedTables,
+        textBlocks: chunkedTextBlocks,
+        extractionQuality: Math.min(1, chunkedTextBlocks.length / 10),
         pageRefs: { pages: processed.pages },
         createdAt: now(),
       });
