@@ -741,6 +741,26 @@ export const getComparisonDataset = query({
   },
 });
 
+export const getLatestJobs = query({
+  handler: async (ctx) => {
+    const jobs = await ctx.db.query("comparisonJobs").order("desc").take(5);
+    const jobsWithDetails = [];
+    for (const job of jobs) {
+      const docs = await ctx.db.query("documents").withIndex("by_job", q => q.eq("jobId", job._id)).collect();
+      const extractions = await ctx.db.query("extractionJobs").withIndex("by_job", q => q.eq("jobId", job._id)).collect();
+      const artifacts = await ctx.db.query("comparisonArtifacts").withIndex("by_job", q => q.eq("jobId", job._id)).collect();
+      jobsWithDetails.push({
+        job,
+        documentsCount: docs.length,
+        extractionsCount: extractions.length,
+        artifactsCount: artifacts.length,
+        extractionStatuses: extractions.map(e => ({ id: e._id, status: e.status, error: e.error })),
+      });
+    }
+    return jobsWithDetails;
+  },
+});
+
 export const proposeSynonym = mutation({
   args: { label_raw: v.string(), context: v.optional(v.string()), suggested_metric_id: v.optional(v.string()), confidence: v.number() },
   handler: async (ctx, args) => {

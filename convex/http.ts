@@ -206,4 +206,22 @@ http.route({
   }),
 });
 
+// Debug endpoint to check latest jobs
+http.route({
+  path: "/debug",
+  method: "GET", 
+  handler: httpAction(async (ctx, req) => {
+    const jobs = await ctx.runQuery(api.pipeline.getLatestJobs);
+    return new Response(JSON.stringify(jobs, null, 2), {
+      status: 200,
+      headers: { 
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
+    });
+  }),
+});
+
 export default http;
