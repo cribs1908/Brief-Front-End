@@ -1,0 +1,31 @@
+# Google Cloud Run configuration for OCR Worker
+# This ensures optimal performance for B2B PDF processing
+
+runtime: python311
+
+# Memory and CPU settings for handling large PDFs (6MB+)
+env_variables:
+  # Tesseract configuration
+  TESSERACT_CONFIG: "--oem 3 --psm 6"
+  
+  # Processing limits for B2B documents
+  MAX_PDF_SIZE: "52428800"  # 50MB
+  DPI: "200"
+  
+  # Timeout settings
+  PROCESSING_TIMEOUT: "300"  # 5 minutes
+
+# Health check
+liveness_check:
+  path: "/health"
+  check_interval_sec: 30
+  timeout_sec: 4
+  failure_threshold: 2
+  success_threshold: 1
+
+readiness_check:
+  path: "/health"
+  check_interval_sec: 5
+  timeout_sec: 4
+  failure_threshold: 2
+  success_threshold: 1

@@ -1,0 +1,10 @@
+# OCR Worker Dependencies
+flask==3.0.0
+gunicorn==21.2.0
+pytesseract==0.3.10
+pdf2image==1.17.0
+pillow==10.1.0
+tabula-py==2.9.0
+pandas==2.1.4
+requests==2.31.0
+python-multipart==0.0.6

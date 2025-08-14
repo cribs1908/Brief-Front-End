@@ -77,24 +77,61 @@ function chunkTables(tables: any[], maxSizeBytes: number): any[] {
   return chunks;
 }
 
-async function processPdfDirect(ctx: any, storageId: string): Promise<{ tables: any[]; textBlocks: Array<{ id: number; text: string }>; pages?: number }> {
+async function processPdfViaOcrWorker(ctx: any, storageId: string): Promise<{ tables: any[]; textBlocks: Array<{ id: number; text: string }>; pages?: number }> {
   try {
-    console.log("DEBUG: Processing PDF directly in Convex");
+    console.log("DEBUG: Processing PDF via OCR Worker (Tabula + OCR pipeline)");
     
-    // Use direct PDF processing action
-    const result = await ctx.runAction(api.pdf_processor.processPdfDirect, { storageId });
+    // Get PDF URL from Convex storage
+    const pdfUrl = await ctx.storage.getUrl(storageId);
+    if (!pdfUrl) {
+      throw new Error("Could not get PDF URL from storage");
+    }
+    
+    console.log("DEBUG: PDF URL obtained, calling OCR Worker");
+    
+    // Call OCR Worker with proper B2B pipeline
+    const ocrWorkerUrl = process.env.OCR_WORKER_URL || process.env.PROCESSOR_SERVICE_URL;
+    if (!ocrWorkerUrl) {
+      throw new Error("OCR_WORKER_URL not configured");
+    }
+    
+    const response = await fetch(`${ocrWorkerUrl.replace(/\/$/, '')}/process-pdf`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        pdf_url: pdfUrl
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OCR Worker failed: ${response.status} - ${errorText}`);
+    }
+    
+    const result = await response.json();
+    console.log("DEBUG: OCR Worker success - Tables:", result.tables?.length, "Text blocks:", result.text_blocks?.length);
     
     return {
       tables: result.tables || [],
-      textBlocks: (result.text_blocks || []).map((t: any, idx: number) => ({ id: idx, text: String(t.text || '').slice(0, 2000) })),
+      textBlocks: (result.text_blocks || []).map((t: any, idx: number) => ({ 
+        id: idx, 
+        text: String(t.text || '').slice(0, 2000) 
+      })),
       pages: result.pages || 1,
     };
+    
   } catch (error: any) {
-    console.error("DEBUG: Direct PDF processing failed:", error?.message || error);
-    // Fallback: return minimal extraction to prevent pipeline breakage
+    console.error("DEBUG: OCR Worker processing failed:", error?.message || error);
+    
+    // Fallback: return informative message about the B2B pipeline
     return { 
       tables: [], 
-      textBlocks: [{ id: 0, text: `Direct PDF processing failed: ${error?.message || 'Unknown error'}. The document may be in an unsupported format.` }], 
+      textBlocks: [{ 
+        id: 0, 
+        text: `B2B PDF processing (OCR + Tabula) failed: ${error?.message || 'Unknown error'}. Large technical documents require the OCR Worker service. Please ensure it's deployed and configured correctly.` 
+      }], 
       pages: 1 
     };
   }
@@ -652,12 +689,12 @@ export const processExtractionJob = action({
       const document = await ctx.runQuery(api.pipeline.getDocumentById, { documentId: ej.documentId as Id<"documents"> });
       if (!document) throw new Error("Document not found");
 
-      // Process via direct Convex processing (eliminates Railway dependency)
-      const storageId = (document as any).storageId || (document as any).sourceUri;
+      // Process via OCR Worker (OCR + Tabula pipeline for B2B docs)
+      const storageId = (document as any).storageId;
       if (!storageId) throw new Error("Document has no storageId for processing");
       
-      console.log("DEBUG: Processing document with storageId:", storageId);
-      const processed = await processPdfDirect(ctx, storageId);
+      console.log("DEBUG: Processing B2B document with storageId:", storageId);
+      const processed = await processPdfViaOcrWorker(ctx, storageId);
       const tables: any[] = processed.tables;
       const textBlocks = processed.textBlocks;
 
