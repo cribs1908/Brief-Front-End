@@ -578,27 +578,35 @@ export const insertComparisonArtifact = mutation({
 export const processAllDocumentsForJob = action({
   args: { jobId: v.id("comparisonJobs") },
   handler: async (ctx, args) => {
-    const job = await ctx.runQuery(api.pipeline.getJobStatus as any, { jobId: args.jobId });
-    await ctx.runMutation(api.pipeline.patchJob as any, { jobId: args.jobId, status: "extracting", updatedAt: now(), progress: { total: (job?.per_document?.length ?? 0), completed: 0, stage: "extracting" } });
+    try {
+      const job = await ctx.runQuery(api.pipeline.getJobStatus as any, { jobId: args.jobId });
+      await ctx.runMutation(api.pipeline.patchJob as any, { jobId: args.jobId, status: "extracting", updatedAt: now(), progress: { total: (job?.per_document?.length ?? 0), completed: 0, stage: "extracting" } });
 
-    const extractionJobs = await ctx.runQuery(api.pipeline.getExtractionJobsByJob, { jobId: args.jobId });
-    let completed = 0;
-    let failures = 0;
-    for (const ej of extractionJobs) {
-      try {
-        await ctx.runAction(api.pipeline.processExtractionJob, { extractionJobId: ej._id as Id<"extractionJobs"> });
-        completed += 1;
-      } catch (e: any) {
-        failures += 1;
-        console.error("Extraction failed", e?.message || e);
+      const extractionJobs = await ctx.runQuery(api.pipeline.getExtractionJobsByJob, { jobId: args.jobId });
+      let completed = 0;
+      let failures = 0;
+      for (const ej of extractionJobs) {
+        try {
+          await ctx.runAction(api.pipeline.processExtractionJob, { extractionJobId: ej._id as Id<"extractionJobs"> });
+          completed += 1;
+        } catch (e: any) {
+          failures += 1;
+          console.error("Extraction failed", e?.message || e);
+          // Marca job di estrazione come fallito per evitare stati bloccati
+          await ctx.runMutation(api.pipeline.patchExtractionJob as any, { extractionJobId: ej._id as Id<"extractionJobs">, status: "failed", updatedAt: now() });
+        }
+        await ctx.runMutation(api.pipeline.patchJob as any, { jobId: args.jobId, updatedAt: now(), progress: { total: extractionJobs.length, completed, stage: "extracting" } });
       }
-      await ctx.runMutation(api.pipeline.patchJob as any, { jobId: args.jobId, updatedAt: now(), progress: { total: extractionJobs.length, completed, stage: "extracting" } });
-    }
 
-    // Esegui aggregazione anche se nessuna metrica estratta: produrre dataset vuoto evita loop lato FE
-    await ctx.runAction(api.pipeline.aggregateJob, { jobId: args.jobId });
-    const finalStatus = failures > 0 && completed > 0 ? "ready_partial" : failures === extractionJobs.length ? "failed_no_signal" : "ready";
-    await ctx.runMutation(api.pipeline.patchJob as any, { jobId: args.jobId, status: finalStatus, updatedAt: now() });
+      // Esegui aggregazione anche se nessuna metrica estratta: produrre dataset vuoto evita loop lato FE
+      await ctx.runAction(api.pipeline.aggregateJob, { jobId: args.jobId });
+      const finalStatus = failures > 0 && completed > 0 ? "ready_partial" : failures === extractionJobs.length ? "failed_no_signal" : "ready";
+      await ctx.runMutation(api.pipeline.patchJob as any, { jobId: args.jobId, status: finalStatus, updatedAt: now() });
+    } catch (e: any) {
+      // Qualsiasi errore inatteso: marca il job come failed per evitare loop infiniti lato FE
+      await ctx.runMutation(api.pipeline.patchJob as any, { jobId: args.jobId, status: "failed", updatedAt: now() });
+      throw e;
+    }
   },
 });
 
@@ -609,102 +617,69 @@ export const processExtractionJob = action({
     if (!ej) throw new Error("Extraction job not found");
     await ctx.runMutation(api.pipeline.patchExtractionJob, { extractionJobId: args.extractionJobId, status: "extracting", updatedAt: now() });
 
-    const document = await ctx.runQuery(api.pipeline.getDocumentById, { documentId: ej.documentId as Id<"documents"> });
-    if (!document) throw new Error("Document not found");
+    try {
+      const document = await ctx.runQuery(api.pipeline.getDocumentById, { documentId: ej.documentId as Id<"documents"> });
+      if (!document) throw new Error("Document not found");
 
-    // Process via external processor
-    const processed = await processPdfViaProcessor((document as any).sourceUri);
-    const tables: any[] = processed.tables;
-    const textBlocks = processed.textBlocks;
+      // Process via external processor
+      const processed = await processPdfViaProcessor((document as any).sourceUri);
+      const tables: any[] = processed.tables;
+      const textBlocks = processed.textBlocks;
 
-    await ctx.runMutation(api.pipeline.insertRawExtraction, {
-      documentId: (document as any)._id as Id<"documents">,
-      tables,
-      textBlocks,
-      extractionQuality: Math.min(1, textBlocks.length / 10),
-      pageRefs: { pages: processed.pages },
-      createdAt: now(),
-    });
-
-    // Debug: log what we received from Railway processor
-    console.log("DEBUG: Received from Railway processor:");
-    console.log("- textBlocks count:", textBlocks.length);
-    console.log("- tables count:", tables.length);
-    console.log("- First 3 text blocks:", textBlocks.slice(0, 3));
-    console.log("- Document vendor:", (document as any).vendorName);
-
-    // LangChain semantic parsing (implements back-end.md section 4.3)
-    const openaiApiKey = process.env.OPENAI_API_KEY;
-    console.log("DEBUG: OpenAI API key available:", !!openaiApiKey);
-    const metricCandidates = await extractMetricCandidates(textBlocks, tables, openaiApiKey);
-    console.log("DEBUG: LangChain extracted candidates:", metricCandidates.length, metricCandidates);
-
-    // Normalization
-    const synonymMap = await ctx.runQuery(api.pipeline.getActiveSynonymMapQuery);
-    const metrics: any[] = [];
-    
-    // Process LangChain extracted metrics
-    console.log("DEBUG: Processing", metricCandidates.length, "metric candidates");
-    for (const candidate of metricCandidates) {
-      console.log("DEBUG: Processing candidate:", candidate.label, "->", candidate.value);
-      const mapping = mapLabelToCanonical(synonymMap?.entries || [], candidate.label);
-      console.log("DEBUG: Synonym mapping result:", mapping);
-      if (!mapping.metricId) {
-        // propose synonym for high-confidence candidates
-        if (candidate.confidence >= 0.75) {
-          await ctx.runMutation(api.pipeline.proposeSynonym as any, {
-            label_raw: candidate.label,
-            context: candidate.sourceContext,
-            suggested_metric_id: undefined,
-            confidence: candidate.confidence,
-          });
-        }
-        continue;
-      }
-      
-      // Find the matching entry for unit rules
-      const synonymEntry = synonymMap?.entries?.find(e => e.canonicalMetricId === mapping.metricId);
-      // Combine value and unit for normalization
-      const valueWithUnit = candidate.unit ? 
-        `${candidate.value} ${candidate.unit}` : 
-        String(candidate.value);
-      
-      console.log("DEBUG: Normalizing value:");
-      console.log("- candidate:", candidate);
-      console.log("- valueWithUnit:", valueWithUnit);
-      console.log("- unitRules:", synonymEntry?.unitRules);
-      
-      const norm = normalizeValueUnit(valueWithUnit, synonymEntry?.unitRules);
-      
-      console.log("DEBUG: Normalization result:", norm);
-      
-      metrics.push({
-        metricId: mapping.metricId,
-        metricLabel: mapping.metricLabel,
-        value_normalized: norm.value,
-        unit_normalized: candidate.unit || norm.unit,
-        confidence: Math.min(candidate.confidence, norm.confidence),
-        source_ref: { 
-          type: "text", 
-          sample: String(candidate.value).slice(0, 120),
-          context: candidate.sourceContext.slice(0, 200),
-          originalLabel: candidate.label,
-          pageRef: candidate.pageRef
-        },
-        normalization_version: synonymMap?.version,
+      await ctx.runMutation(api.pipeline.insertRawExtraction, {
+        documentId: (document as any)._id as Id<"documents">,
+        tables,
+        textBlocks,
+        extractionQuality: Math.min(1, textBlocks.length / 10),
+        pageRefs: { pages: processed.pages },
+        createdAt: now(),
       });
+
+      // LangChain semantic parsing (implements back-end.md section 4.3)
+      const openaiApiKey = process.env.OPENAI_API_KEY;
+      const metricCandidates = await extractMetricCandidates(textBlocks, tables, openaiApiKey);
+
+      // Normalization
+      const synonymMap = await ctx.runQuery(api.pipeline.getActiveSynonymMapQuery);
+      const metrics: any[] = [];
+      for (const candidate of metricCandidates) {
+        const mapping = mapLabelToCanonical(synonymMap?.entries || [], candidate.label);
+        if (!mapping.metricId) {
+          if (candidate.confidence >= 0.75) {
+            await ctx.runMutation(api.pipeline.proposeSynonym as any, {
+              label_raw: candidate.label,
+              context: candidate.sourceContext,
+              suggested_metric_id: undefined,
+              confidence: candidate.confidence,
+            });
+          }
+          continue;
+        }
+        const synonymEntry = synonymMap?.entries?.find(e => e.canonicalMetricId === mapping.metricId);
+        const valueWithUnit = candidate.unit ? `${candidate.value} ${candidate.unit}` : String(candidate.value);
+        const norm = normalizeValueUnit(valueWithUnit, synonymEntry?.unitRules);
+        metrics.push({
+          metricId: mapping.metricId,
+          metricLabel: mapping.metricLabel,
+          value_normalized: norm.value,
+          unit_normalized: candidate.unit || norm.unit,
+          confidence: Math.min(candidate.confidence, norm.confidence),
+          source_ref: { type: "text", sample: String(candidate.value).slice(0, 120), context: candidate.sourceContext.slice(0, 200), originalLabel: candidate.label, pageRef: candidate.pageRef },
+          normalization_version: synonymMap?.version,
+        });
+      }
+
+      await ctx.runMutation(api.pipeline.insertNormalizedMetricsMutation, {
+        documentId: (document as any)._id as Id<"documents">,
+        metrics,
+        createdAt: now(),
+      });
+
+      await ctx.runMutation(api.pipeline.patchExtractionJob, { extractionJobId: args.extractionJobId, status: "normalized", updatedAt: now(), qualityScore: Math.min(1, metrics.length / 15) });
+    } catch (e: any) {
+      await ctx.runMutation(api.pipeline.patchExtractionJob, { extractionJobId: args.extractionJobId, status: "failed", updatedAt: now() });
+      throw e;
     }
-
-    console.log("DEBUG: Final metrics array length:", metrics.length);
-    console.log("DEBUG: Final metrics:", metrics);
-
-    await ctx.runMutation(api.pipeline.insertNormalizedMetricsMutation, {
-      documentId: (document as any)._id as Id<"documents">,
-      metrics,
-      createdAt: now(),
-    });
-
-    await ctx.runMutation(api.pipeline.patchExtractionJob, { extractionJobId: args.extractionJobId, status: "normalized", updatedAt: now(), qualityScore: Math.min(1, metrics.length / 15) });
   },
 });
 
