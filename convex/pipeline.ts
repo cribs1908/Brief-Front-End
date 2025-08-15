@@ -3,6 +3,9 @@ import { v } from "convex/values";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { extractMetricCandidates } from "./langchain_parser";
+import { classifyDomain, combineClassifications, classifyFromFilename } from "./domain_classifier";
+import { getDomainProfile } from "./domain_profiles";
+import { UNIVERSAL_SCHEMA } from "./domain_schema";
 
 // Types
 type PdfSpec = { uri: string; vendor_hint?: string | null };
@@ -612,6 +615,27 @@ export const insertRawExtraction = mutation({
   },
 });
 
+export const insertDomainClassification = mutation({
+  args: { 
+    documentId: v.id("documents"), 
+    domain: v.string(), 
+    confidence: v.number(), 
+    method: v.string(),
+    alternativeDomains: v.array(v.object({ domain: v.string(), confidence: v.number() })),
+    requiresConfirmation: v.boolean(),
+    evidence: v.object({
+      primary_matches: v.array(v.string()),
+      secondary_matches: v.array(v.string()),
+      section_matches: v.array(v.string()),
+      negative_matches: v.array(v.string())
+    }),
+    createdAt: v.number() 
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("domainClassifications", args);
+  },
+});
+
 export const insertNormalizedMetricsMutation = mutation({
   args: { documentId: v.id("documents"), metrics: v.any(), createdAt: v.number() },
   handler: async (ctx, args) => {
@@ -718,9 +742,45 @@ export const processExtractionJob = action({
         createdAt: now(),
       });
 
-      // LangChain semantic parsing (implements back-end.md section 4.3)
+      // STEP 1: Domain Classification (implements applogic.md section 1)
+      console.log("DEBUG: Starting domain classification for B2B document");
+      
+      const contentClassification = classifyDomain(textBlocks, tables);
+      const filenameClassification = document.vendorName ? 
+        classifyFromFilename(document.vendorName) : null;
+      
+      const finalClassification = combineClassifications(
+        contentClassification, 
+        filenameClassification
+      );
+      
+      console.log("DEBUG: Domain classified as:", finalClassification.domain, 
+                  "confidence:", finalClassification.confidence);
+      
+      // Store classification
+      await ctx.runMutation(api.pipeline.insertDomainClassification as any, {
+        documentId: (document as any)._id as Id<"documents">,
+        domain: finalClassification.domain,
+        confidence: finalClassification.confidence,
+        method: finalClassification.method,
+        alternativeDomains: finalClassification.alternative_domains || [],
+        requiresConfirmation: finalClassification.requires_user_confirmation,
+        evidence: finalClassification.evidence,
+        createdAt: now()
+      });
+      
+      // STEP 2: Domain-Aware LangChain extraction (implements applogic.md section 4)
       const openaiApiKey = process.env.OPENAI_API_KEY;
-      const metricCandidates = await extractMetricCandidates(textBlocks, tables, openaiApiKey);
+      const domainProfile = getDomainProfile(finalClassification.domain);
+      
+      console.log("DEBUG: Using profile version:", domainProfile.version, "for domain:", domainProfile.domain);
+      
+      const metricCandidates = await extractMetricCandidates(
+        textBlocks, 
+        tables, 
+        openaiApiKey,
+        domainProfile  // Pass domain profile to LangChain
+      );
 
       // Normalization
       const synonymMap = await ctx.runQuery(api.pipeline.getActiveSynonymMapQuery);

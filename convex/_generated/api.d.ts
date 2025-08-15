@@ -8,13 +8,18 @@
  * @module
  */
 
+import type * as domain_classifier from "../domain_classifier.js";
+import type * as domain_profiles from "../domain_profiles.js";
+import type * as domain_schema from "../domain_schema.js";
 import type * as http from "../http.js";
 import type * as http_full from "../http_full.js";
+import type * as jobs from "../jobs.js";
 import type * as langchain_parser from "../langchain_parser.js";
 import type * as pipeline from "../pipeline.js";
 import type * as subscriptions from "../subscriptions.js";
 import type * as users from "../users.js";
 import type * as utils_crypto from "../utils/crypto.js";
+import type * as workspaces from "../workspaces.js";
 
 import type {
   ApiFromModules,
@@ -31,13 +36,18 @@ import type {
  * ```
  */
 declare const fullApi: ApiFromModules<{
+  domain_classifier: typeof domain_classifier;
+  domain_profiles: typeof domain_profiles;
+  domain_schema: typeof domain_schema;
   http: typeof http;
   http_full: typeof http_full;
+  jobs: typeof jobs;
   langchain_parser: typeof langchain_parser;
   pipeline: typeof pipeline;
   subscriptions: typeof subscriptions;
   users: typeof users;
   "utils/crypto": typeof utils_crypto;
+  workspaces: typeof workspaces;
 }>;
 declare const fullApiWithMounts: typeof fullApi;
 

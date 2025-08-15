@@ -247,6 +247,9 @@ function buildMockTable(files: ComparisonFile[], synonyms: SynonymsMap): Compari
 const API_BASE: string = (import.meta as any).env?.VITE_CONVEX_HTTP_URL || (import.meta as any).env?.VITE_CONVEX_URL || "";
 const DISABLE_MOCKS: boolean = ((import.meta as any).env?.VITE_DISABLE_MOCKS || "true").toString() === "true";
 
+// Workspace context - for now use a default workspace ID
+const DEFAULT_WORKSPACE_ID = "default_workspace_123"; // In prod this would come from auth context
+
 async function getUploadUrl(): Promise<string> {
   const res = await fetch(`${API_BASE}/api/upload-url`);
   if (!res.ok) throw new Error("Upload URL non disponibile");
@@ -299,6 +302,92 @@ function buildTableFromDataset(ds: BackendDataset): ComparisonTable {
     return { key: m.label, category, type, values };
   });
   return { columns, vendorMeta, rows, sort: null, filters: defaultFilters, pinnedKeys: [] };
+}
+
+// Convert new API results format to frontend table format
+function buildTableFromNewResults(results: any): ComparisonTable {
+  if (!results.columns || !results.rows) {
+    // Handle empty results
+    return {
+      columns: ["Metrica"],
+      vendorMeta: [],
+      rows: [],
+      sort: null,
+      filters: defaultFilters,
+      pinnedKeys: []
+    };
+  }
+
+  // Get document names from rows (each row represents a document)
+  const documentNames = results.rows.map((row: any, i: number) => 
+    `Document ${i + 1}` // Placeholder names, could be enhanced with actual document names
+  );
+  
+  const columns = ["Metrica", ...documentNames];
+
+  // Build vendor metadata
+  const vendorMeta = documentNames.map((docName: string, i: number) => ({
+    vendor: docName,
+    source: docName, 
+    docId: results.rows[i]?.documentId || `doc-${i}`,
+    dateParsed: Date.now(),
+  }));
+
+  // Transform from document-centric to metric-centric structure
+  const metricRows: any[] = [];
+  
+  // For each column (field), create a row across all documents
+  for (const column of results.columns) {
+    const metricKey = column.label || column.id;
+    
+    // Collect values for this metric across all documents
+    const values = results.rows.map((row: any) => {
+      const cell = row.cells[column.id];
+      if (!cell || cell.value === null) return null;
+      
+      // Handle different value types
+      if (typeof cell.value === 'boolean') return cell.value;
+      if (typeof cell.value === 'number') return cell.value;
+      
+      // For string values, include unit if present
+      if (cell.unit && cell.unit !== 'boolean') {
+        return `${cell.value} ${cell.unit}`;
+      }
+      
+      return String(cell.value);
+    });
+
+    // Determine type based on values
+    let type: "numeric" | "boolean" | "text" = "text";
+    const nonNullValues = values.filter((v: any) => v !== null);
+    
+    if (nonNullValues.length > 0) {
+      if (nonNullValues.every((v: any) => typeof v === "boolean")) {
+        type = "boolean";
+      } else if (nonNullValues.every((v: any) => typeof v === "number")) {
+        type = "numeric";  
+      }
+    }
+
+    // Infer category from metric name
+    const category = inferCategoryFromLabel(metricKey);
+
+    metricRows.push({
+      key: metricKey,
+      category,
+      type,
+      values
+    });
+  }
+
+  return {
+    columns,
+    vendorMeta,
+    rows: metricRows,
+    sort: null,
+    filters: defaultFilters,
+    pinnedKeys: []
+  };
 }
 
 type Ctx = {
@@ -413,7 +502,7 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     }
     
     // Production diagnostic logging
-    console.log("=== PROCESSING START ===");
+    console.log("=== PROCESSING START (New Pipeline) ===");
     console.log("API_BASE:", API_BASE);
     console.log("Files to process:", state.files.map(f => ({ name: f.name, storageId: f.storageId })));
     console.log("DISABLE_MOCKS:", DISABLE_MOCKS);
@@ -430,106 +519,222 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
       
       // Health check: test API connectivity first
       try {
-        const healthRes = await fetch(`${API_BASE}/api/upload-url`);
+        const healthRes = await fetch(`${API_BASE}/health`);
         if (!healthRes.ok) {
-          throw new Error(`API connectivity test failed: ${healthRes.status}`);
+          throw new Error(`API health check failed: ${healthRes.status}`);
         }
         console.log("✓ API connectivity confirmed");
       } catch (healthErr) {
         console.error("✗ API connectivity failed:", healthErr);
+        // Try legacy endpoint
+        try {
+          const legacyRes = await fetch(`${API_BASE}/api/upload-url`);
+          if (legacyRes.ok) {
+            console.log("✓ Legacy API available - falling back");
+            return await startProcessingLegacy();
+          }
+        } catch (legacyErr) {
+          console.error("✗ Legacy API also failed:", legacyErr);
+        }
         throw new Error(`Cannot connect to backend: ${healthErr instanceof Error ? healthErr.message : healthErr}`);
       }
       
-      // Use already uploaded storageIds
-      const items = state.files.map((meta) => {
-        if (!meta.storageId) throw new Error(`StorageId mancante per ${meta.name}`);
-        const vendor_hint = meta.vendorName?.trim() || meta.name.replace(/\.pdf$/i, "");
-        return { storageId: meta.storageId, vendor_hint };
-      });
-
-      console.log("Creating job with items:", items);
-
-      // Create job
-      const res = await fetch(`${API_BASE}/api/jobs/create`, {
+      // === NEW PIPELINE ===
+      
+      // Step 1: Create job
+      console.log("Creating new job...");
+      const createJobRes = await fetch(`${API_BASE}/api/jobs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdf_list: items, job_name: "Confronto" }),
+        body: JSON.stringify({ 
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          domainMode: "auto" // auto-detect domain
+        }),
       });
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Job creation failed:", res.status, errorText);
-        throw new Error(`Creazione job fallita: ${res.status} - ${errorText}`);
+      if (!createJobRes.ok) {
+        const errorText = await createJobRes.text();
+        console.error("Job creation failed:", createJobRes.status, errorText);
+        throw new Error(`Creazione job fallita: ${createJobRes.status} - ${errorText}`);
       }
-      const { job_id } = await res.json();
-      console.log("✓ Job created:", job_id);
+      const { jobId } = await createJobRes.json();
+      console.log("✓ Job created:", jobId);
 
-      // Simplified processing - direct execution, no infinite polling
+      // Step 2: Upload documents to job
       dispatch({ type: "SET_PROCESSING", processing: { step: 2, running: true } });
       
-      // Wait for processing to complete (direct processing is faster)
-      console.log("Waiting for processing completion...");
-      await new Promise(resolve => setTimeout(resolve, 3000)); // Give processing time to complete
-      
+      for (const file of state.files) {
+        if (!file.storageId) continue;
+        
+        console.log(`Uploading document ${file.name} to job...`);
+        const uploadDocRes = await fetch(`${API_BASE}/api/jobs/${jobId}/documents`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            filename: file.name,
+            storageId: file.storageId,
+          }),
+        });
+        
+        if (!uploadDocRes.ok) {
+          const errorText = await uploadDocRes.text();
+          console.warn(`Document upload failed for ${file.name}:`, errorText);
+          // Continue with other files
+        }
+      }
+
+      // Step 3: Start processing
       dispatch({ type: "SET_PROCESSING", processing: { step: 3, running: true } });
       
-      // Check for completion with limited retries (no infinite loop)
-      let dataset: BackendDataset | null = null;
-      for (let attempt = 0; attempt < 10; attempt++) {
+      console.log("Starting job processing...");
+      const processRes = await fetch(`${API_BASE}/api/jobs/${jobId}/process`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      
+      if (!processRes.ok) {
+        const errorText = await processRes.text();
+        console.warn("Process start failed:", errorText);
+        // Continue anyway - job might process automatically
+      }
+      
+      // Step 4: Poll for results
+      console.log("Polling for results...");
+      let results: any = null;
+      for (let attempt = 0; attempt < 20; attempt++) {
         try {
-          const d = await fetch(`${API_BASE}/api/jobs/dataset?jobId=${encodeURIComponent(job_id)}`);
-          if (d.ok) {
-            const result = await d.json();
-            if (result && (result.vendors?.length > 0 || result.metrics?.length > 0)) {
-              dataset = result;
-              console.log("✓ Dataset ready with data:", { vendors: result.vendors?.length, metrics: result.metrics?.length });
-              break;
+          const statusRes = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+          if (statusRes.ok) {
+            const jobStatus = await statusRes.json();
+            console.log(`Attempt ${attempt + 1}: Job status:`, jobStatus.job?.status);
+            
+            if (jobStatus.job?.status === "READY") {
+              // Get results
+              const resultsRes = await fetch(`${API_BASE}/api/jobs/${jobId}/results`);
+              if (resultsRes.ok) {
+                results = await resultsRes.json();
+                console.log("✓ Results ready:", results);
+                break;
+              }
+            } else if (jobStatus.job?.status === "FAILED") {
+              throw new Error(`Job failed: ${jobStatus.job?.error || "Unknown error"}`);
             }
           }
-          console.log(`Attempt ${attempt + 1}: Dataset not ready yet, retrying...`);
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          await new Promise(resolve => setTimeout(resolve, 3000));
         } catch (err) {
           console.warn(`Attempt ${attempt + 1} failed:`, err);
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 3000));
         }
       }
       
-      if (!dataset) {
-        throw new Error("Processing completed but no data was extracted. Please try with different PDF files.");
+      if (!results) {
+        console.log("No results from new pipeline, trying legacy...");
+        return await startProcessingLegacy();
       }
-      const table = buildTableFromDataset(dataset);
+      
+      // Convert new results format to table
+      const table = buildTableFromNewResults(results);
       dispatch({ type: "SET_TABLE", table });
       dispatch({ type: "SET_RESULTS", has: true });
+      
     } catch (e) {
-      console.error("Processing failed:", e);
+      console.error("New pipeline failed:", e);
+      console.log("Falling back to legacy pipeline...");
       
-      // Production-ready error handling: always show something to user
-      const errorMsg = e instanceof Error ? e.message : "Processing failed unexpectedly";
-      
-      // Create minimal diagnostic table to show extraction attempt
-      const diagnosticTable = {
-        columns: ["Metrica", ...state.files.map(f => f.vendorName || f.name.replace(/\.pdf$/i, ""))],
-        vendorMeta: state.files.map((f, i) => ({ 
-          vendor: f.vendorName || f.name.replace(/\.pdf$/i, ""), 
-          source: f.name, 
-          docId: `error-${i}`, 
-          dateParsed: Date.now() 
-        })),
-        rows: [{
-          key: "Extraction Status",
-          category: "Performance", 
-          type: "text" as const,
-          values: state.files.map(() => `Failed: ${errorMsg}`)
-        }],
-        sort: null,
-        filters: defaultFilters,
-        pinnedKeys: []
-      };
-      
-      dispatch({ type: "SET_TABLE", table: diagnosticTable });
-      dispatch({ type: "SET_RESULTS", has: true });
+      try {
+        return await startProcessingLegacy();
+      } catch (legacyErr) {
+        console.error("Legacy pipeline also failed:", legacyErr);
+        
+        // Production-ready error handling: always show something to user
+        const errorMsg = e instanceof Error ? e.message : "Processing failed unexpectedly";
+        
+        // Create minimal diagnostic table to show extraction attempt
+        const diagnosticTable = {
+          columns: ["Metrica", ...state.files.map(f => f.vendorName || f.name.replace(/\.pdf$/i, ""))],
+          vendorMeta: state.files.map((f, i) => ({ 
+            vendor: f.vendorName || f.name.replace(/\.pdf$/i, ""), 
+            source: f.name, 
+            docId: `error-${i}`, 
+            dateParsed: Date.now() 
+          })),
+          rows: [{
+            key: "Extraction Status",
+            category: "Performance", 
+            type: "text" as const,
+            values: state.files.map(() => `Failed: ${errorMsg}`)
+          }],
+          sort: null,
+          filters: defaultFilters,
+          pinnedKeys: []
+        };
+        
+        dispatch({ type: "SET_TABLE", table: diagnosticTable });
+        dispatch({ type: "SET_RESULTS", has: true });
+      }
     } finally {
-    dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
+      dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
     }
+  }, [state.files]);
+
+  // Legacy processing function (fallback)
+  const startProcessingLegacy = useCallback(async () => {
+    console.log("=== LEGACY PROCESSING START ===");
+    
+    // Use already uploaded storageIds
+    const items = state.files.map((meta) => {
+      if (!meta.storageId) throw new Error(`StorageId mancante per ${meta.name}`);
+      const vendor_hint = meta.vendorName?.trim() || meta.name.replace(/\.pdf$/i, "");
+      return { storageId: meta.storageId, vendor_hint };
+    });
+
+    console.log("Creating legacy job with items:", items);
+
+    // Create job (legacy API)
+    const res = await fetch(`${API_BASE}/api/jobs/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pdf_list: items, job_name: "Confronto" }),
+    });
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error("Legacy job creation failed:", res.status, errorText);
+      throw new Error(`Creazione job legacy fallita: ${res.status} - ${errorText}`);
+    }
+    const { job_id } = await res.json();
+    console.log("✓ Legacy job created:", job_id);
+
+    // Wait for processing to complete
+    console.log("Waiting for legacy processing completion...");
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Check for completion with limited retries (no infinite loop)
+    let dataset: BackendDataset | null = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const d = await fetch(`${API_BASE}/api/jobs/dataset?jobId=${encodeURIComponent(job_id)}`);
+        if (d.ok) {
+          const result = await d.json();
+          if (result && (result.vendors?.length > 0 || result.metrics?.length > 0)) {
+            dataset = result;
+            console.log("✓ Legacy dataset ready with data:", { vendors: result.vendors?.length, metrics: result.metrics?.length });
+            break;
+          }
+        }
+        console.log(`Legacy attempt ${attempt + 1}: Dataset not ready yet, retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (err) {
+        console.warn(`Legacy attempt ${attempt + 1} failed:`, err);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+    
+    if (!dataset) {
+      throw new Error("Legacy processing completed but no data was extracted. Please try with different PDF files.");
+    }
+    const table = buildTableFromDataset(dataset);
+    dispatch({ type: "SET_TABLE", table });
+    dispatch({ type: "SET_RESULTS", has: true });
   }, [state.files]);
 
   const setSort = useCallback((sort: SortState) => dispatch({ type: "SET_TABLE_SORT", sort }), []);

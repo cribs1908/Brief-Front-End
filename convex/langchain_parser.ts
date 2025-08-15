@@ -94,12 +94,76 @@ CRITICAL: Return valid JSON only. Do NOT wrap in markdown backticks. Extract as 
 `);
 
 /**
+ * Create domain-aware LangChain prompt based on domain profile
+ * Implements applogic.md section 4 - domain-specific extraction rules
+ */
+function createDomainAwarePrompt(domainProfile: any): PromptTemplate {
+  if (!domainProfile) return SEMANTIC_PARSING_PROMPT;
+  
+  // Build domain-specific field list from profile
+  const priorityFields = domainProfile.active_fields
+    .sort((a: any, b: any) => b.priority - a.priority)  // Sort by priority descending
+    .slice(0, 15)  // Top 15 fields to keep prompt manageable
+    .map((field: any) => {
+      const synonyms = domainProfile.field_synonyms[field.field] || [];
+      const unitTarget = domainProfile.unit_targets[field.field];
+      return `- ${field.display_label}: Look for ${synonyms.join(', ')}${unitTarget ? ` (target unit: ${unitTarget})` : ''}`;
+    })
+    .join('\n');
+    
+  const sectionPriorities = domainProfile.priority_sections.slice(0, 8).join(', ');
+  
+  const domainSpecificPrompt = `
+You are an expert at extracting structured metrics from ${domainProfile.domain.toUpperCase()} B2B technical documents.
+
+DOMAIN-SPECIFIC EXTRACTION RULES FOR ${domainProfile.domain.toUpperCase()}:
+
+TARGET FIELDS (in priority order):
+${priorityFields}
+
+PRIORITY SECTIONS TO SEARCH:
+Look especially in these document sections: ${sectionPriorities}
+
+DOMAIN-SPECIFIC UNIT CONVERSIONS:
+${Object.entries(domainProfile.unit_targets).map(([field, target]) => 
+  `- ${field}: Convert all values to ${target}`
+).join('\n')}
+
+FIELD SYNONYMS TO RECOGNIZE:
+${Object.entries(domainProfile.field_synonyms).slice(0, 10).map(([field, synonyms]) => 
+  `- ${field}: ${(synonyms as string[]).join(', ')}`
+).join('\n')}
+
+Your task is to extract ALL possible metrics from the provided text that match the above domain profile. 
+Be COMPREHENSIVE - B2B buyers need complete technical specifications for procurement decisions.
+
+CRITICAL INSTRUCTIONS:
+1. Focus on the priority fields listed above
+2. Use the synonyms to identify metrics that might be labeled differently
+3. Pay special attention to the priority document sections
+4. Extract values with proper units according to target specifications
+5. For ranges (min/typ/max), extract the complete range information
+6. Mark confidence lower if unit conversion was required
+
+Text to analyze:
+{text}
+
+CRITICAL: Return valid JSON only. Do NOT wrap in markdown backticks.
+
+{format_instructions}
+`;
+
+  return PromptTemplate.fromTemplate(domainSpecificPrompt);
+}
+
+/**
  * LangChain-powered semantic parser for extracting metrics from text
  * Implements the Information Extraction pipeline from back-end.md section 4.3
  */
 export async function parseMetricsWithLangChain(
   textBlocks: Array<{ text: string; page?: number }>,
-  openaiApiKey?: string
+  openaiApiKey?: string,
+  domainProfile?: any
 ): Promise<MetricCandidate[]> {
   if (!openaiApiKey) {
     console.warn("No OpenAI API key provided, falling back to basic pattern matching");
@@ -123,14 +187,17 @@ export async function parseMetricsWithLangChain(
 
     console.log("DEBUG: Sending to LangChain:", combinedText.substring(0, 500));
 
-    // Create chain with structured output parser
-    const chain = SEMANTIC_PARSING_PROMPT.pipe(llm).pipe(outputParser);
+    // Create domain-aware prompt based on profile
+    const domainAwarePrompt = createDomainAwarePrompt(domainProfile);
+    const finalPrompt = domainProfile ? domainAwarePrompt : SEMANTIC_PARSING_PROMPT;
+    
+    console.log("DEBUG: Using", domainProfile ? 'domain-aware' : 'generic', "extraction prompt for domain:", domainProfile?.domain);
 
     // Run LangChain extraction with format instructions
     const rawResponse = await llm.invoke([
       {
-        type: "human", 
-        content: SEMANTIC_PARSING_PROMPT.format({
+        type: "human" as const,
+        content: await finalPrompt.format({
           text: combinedText,
           format_instructions: outputParser.getFormatInstructions()
         })
@@ -176,13 +243,14 @@ export async function parseMetricsWithLangChain(
 export async function extractMetricCandidates(
   textBlocks: Array<{ text: string; page?: number }>,
   tables: Array<any> = [],
-  openaiApiKey?: string
+  openaiApiKey?: string,
+  domainProfile?: any
 ): Promise<MetricCandidate[]> {
   const candidates: MetricCandidate[] = [];
 
-  // Try LangChain first for semantic understanding
+  // Try LangChain first for semantic understanding with domain awareness
   if (openaiApiKey) {
-    const langchainResults = await parseMetricsWithLangChain(textBlocks, openaiApiKey);
+    const langchainResults = await parseMetricsWithLangChain(textBlocks, openaiApiKey, domainProfile);
     candidates.push(...langchainResults);
   }
 

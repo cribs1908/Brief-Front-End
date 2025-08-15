@@ -58,6 +58,7 @@ export const upsertUser = mutation({
       name: identity.name,
       email: identity.email,
       tokenIdentifier: identity.subject,
+      clerkId: identity.subject.split('|')[1] || identity.subject, // Extract Clerk ID from token
     });
 
     return await ctx.db.get(userId);
