@@ -12,3 +12,4 @@
 /processor/.env*
 
 .env.local
+.env.production
