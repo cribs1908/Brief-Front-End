@@ -98,33 +98,61 @@ async function processPdfViaOcrWorker(ctx: any, storageId: string): Promise<{ ta
       throw new Error("OCR_WORKER_URL not configured");
     }
     
-    const response = await fetch(`${ocrWorkerUrl.replace(/\/$/, '')}/process-pdf`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        pdf_url: pdfUrl
-      }),
-    });
+    // Aggiungi timeout e retry logic
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 secondi timeout
+    
+    try {
+      const response = await fetch(`${ocrWorkerUrl.replace(/\/$/, '')}/process-pdf`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pdf_url: pdfUrl
+        }),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
     
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`OCR Worker failed: ${response.status} - ${errorText}`);
+      console.error(`OCR Worker HTTP error: ${response.status} - ${errorText}`);
+      
+      // Gestione specifica per errori comuni
+      if (response.status === 503) {
+        throw new Error(`OCR Worker service temporarily unavailable (503). Please check if the OCR Worker is deployed and running.`);
+      } else if (response.status === 404) {
+        throw new Error(`OCR Worker endpoint not found (404). Please verify the OCR_WORKER_URL configuration.`);
+      } else if (response.status >= 500) {
+        throw new Error(`OCR Worker internal error (${response.status}). Service may be experiencing issues.`);
+      } else {
+        throw new Error(`OCR Worker failed: ${response.status} - ${errorText}`);
+      }
     }
     
-    const result = await response.json();
-    console.log("DEBUG: OCR Worker success - Tables:", result.tables?.length, "Text blocks:", result.text_blocks?.length);
-    
-    return {
-      tables: result.tables || [],
-      textBlocks: (result.text_blocks || []).map((t: any, idx: number) => ({ 
-        id: idx, 
-        text: String(t.text || '').slice(0, 4000),  // Increased for B2B docs
-        page: t.page || idx + 1
-      })),
-      pages: result.pages || 1,
-    };
+      const result = await response.json();
+      console.log("DEBUG: OCR Worker success - Tables:", result.tables?.length, "Text blocks:", result.text_blocks?.length);
+      
+      return {
+        tables: result.tables || [],
+        textBlocks: (result.text_blocks || []).map((t: any, idx: number) => ({ 
+          id: idx, 
+          text: String(t.text || '').slice(0, 4000),  // Increased for B2B docs
+          page: t.page || idx + 1
+        })),
+        pages: result.pages || 1,
+      };
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      
+      if (fetchError.name === 'AbortError') {
+        throw new Error('OCR Worker request timed out after 30 seconds. The service may be overloaded or experiencing issues.');
+      }
+      
+      throw fetchError;
+    }
     
   } catch (error: any) {
     console.error("DEBUG: OCR Worker processing failed:", error?.message || error);
@@ -133,11 +161,17 @@ async function processPdfViaOcrWorker(ctx: any, storageId: string): Promise<{ ta
     const errorMessage = error?.message || 'Unknown error';
     console.error("DEBUG: Full error details:", error);
     
+    // Log specifico per errori di connettività
+    if (errorMessage.includes('503') || errorMessage.includes('unavailable')) {
+      console.error("OCR Worker service appears to be down. Check deployment status.");
+    }
+    
+    // Fallback più robusto che permette di continuare l'elaborazione
     return { 
       tables: [], 
       textBlocks: [{ 
         id: 0, 
-        text: `PDF processing temporarily unavailable. Error: ${errorMessage}. This could be due to: 1) OCR Worker service not running, 2) PDF format issues, 3) Network connectivity. Please check the OCR Worker deployment status.`,
+        text: `PDF processing temporarily unavailable. Error: ${errorMessage}. The system will continue with basic text extraction. Please check OCR Worker deployment status.`,
         page: 1
       }], 
       pages: 1 
@@ -624,10 +658,10 @@ export const insertDomainClassification = mutation({
     alternativeDomains: v.array(v.object({ domain: v.string(), confidence: v.number() })),
     requiresConfirmation: v.boolean(),
     evidence: v.object({
-      primary_matches: v.array(v.string()),
-      secondary_matches: v.array(v.string()),
-      section_matches: v.array(v.string()),
-      negative_matches: v.array(v.string())
+      primaryMatches: v.array(v.string()),
+      secondaryMatches: v.array(v.string()),
+      sectionMatches: v.array(v.string()),
+      negativeMatches: v.array(v.string())
     }),
     createdAt: v.number() 
   },

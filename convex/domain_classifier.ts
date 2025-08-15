@@ -69,10 +69,10 @@ export interface ClassificationResult {
   }>;
   requires_user_confirmation: boolean;
   evidence: {
-    primary_matches: string[];
-    secondary_matches: string[];
-    section_matches: string[];
-    negative_matches: string[];
+    primaryMatches: string[];
+    secondaryMatches: string[];
+    sectionMatches: string[];
+    negativeMatches: string[];
   };
 }
 
@@ -101,17 +101,17 @@ export function classifyDomain(
   for (const [domain, keywords] of Object.entries(DOMAIN_KEYWORDS)) {
     let score = 0;
     const domainEvidence = {
-      primary_matches: [] as string[],
-      secondary_matches: [] as string[],
-      section_matches: [] as string[],
-      negative_matches: [] as string[]
+      primaryMatches: [] as string[],
+      secondaryMatches: [] as string[],
+      sectionMatches: [] as string[],
+      negativeMatches: [] as string[]
     };
     
     // Primary keywords (peso 3x)
     for (const keyword of keywords.primary) {
       if (allText.includes(keyword.toLowerCase())) {
         score += 3;
-        domainEvidence.primary_matches.push(keyword);
+        domainEvidence.primaryMatches.push(keyword);
       }
     }
     
@@ -119,7 +119,7 @@ export function classifyDomain(
     for (const keyword of keywords.secondary) {
       if (allText.includes(keyword.toLowerCase())) {
         score += 1;
-        domainEvidence.secondary_matches.push(keyword);
+        domainEvidence.secondaryMatches.push(keyword);
       }
     }
     
@@ -127,7 +127,7 @@ export function classifyDomain(
     for (const section of keywords.sections) {
       if (allText.includes(section.toLowerCase())) {
         score += 2;
-        domainEvidence.section_matches.push(section);
+        domainEvidence.sectionMatches.push(section);
       }
     }
     
@@ -135,7 +135,7 @@ export function classifyDomain(
     for (const keyword of keywords.negative) {
       if (allText.includes(keyword.toLowerCase())) {
         score -= 2;
-        domainEvidence.negative_matches.push(keyword);
+        domainEvidence.negativeMatches.push(keyword);
       }
     }
     
@@ -157,10 +157,10 @@ export function classifyDomain(
       alternative_domains: [],
       requires_user_confirmation: true,
       evidence: {
-        primary_matches: [],
-        secondary_matches: [],
-        section_matches: [],
-        negative_matches: []
+        primaryMatches: [],
+        secondaryMatches: [],
+        sectionMatches: [],
+        negativeMatches: []
       }
     };
   }

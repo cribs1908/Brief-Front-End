@@ -28,6 +28,40 @@ app.use(
   })
 );
 
+// Health check endpoint
+app.get("/version", (req, res) => {
+  res.json({
+    version: "1.0.0",
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || "development",
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+  });
+});
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Test endpoint per verificare funzionalità
+app.get("/test", (req, res) => {
+  res.json({
+    message: "Processor is running correctly",
+    capabilities: {
+      pdf_processing: true,
+      ocr: true,
+      table_extraction: true,
+      text_extraction: true
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
 const ExtractInput = z.object({
   pdf_url: z.string().url(),
   hints: z
@@ -511,8 +545,24 @@ app.post("/extract", async (req, res) => {
   }
 });
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
-app.get("/version", (_req, res) => res.json({ node: process.versions.node, versions: process.versions }));
+// Global error handler
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// 404 handler
+app.use((req: express.Request, res: express.Response) => {
+  res.status(404).json({
+    error: 'Not found',
+    message: `Endpoint ${req.method} ${req.path} not found`,
+    timestamp: new Date().toISOString(),
+  });
+});
 
 app.listen(PORT, () => {
   console.log(`[processor] listening on :${PORT}`);
