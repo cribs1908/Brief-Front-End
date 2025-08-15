@@ -390,10 +390,10 @@ export const classifyJobDocuments = action({
         alternativeDomains: classification.alternative_domains || [],
         requiresConfirmation: classification.requires_user_confirmation,
         evidence: {
-          primaryMatches: classification.evidence.primary_matches,
-          secondaryMatches: classification.evidence.secondary_matches,
-          sectionMatches: classification.evidence.section_matches,
-          negativeMatches: classification.evidence.negative_matches,
+          primaryMatches: classification.evidence.primaryMatches,
+          secondaryMatches: classification.evidence.secondaryMatches,
+          sectionMatches: classification.evidence.sectionMatches,
+          negativeMatches: classification.evidence.negativeMatches,
         },
         createdAt: now(),
       });

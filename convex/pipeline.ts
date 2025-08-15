@@ -171,8 +171,7 @@ async function processPdfViaOcrWorker(ctx: any, storageId: string): Promise<{ ta
       tables: [], 
       textBlocks: [{ 
         id: 0, 
-        text: `PDF processing temporarily unavailable. Error: ${errorMessage}. The system will continue with basic text extraction. Please check OCR Worker deployment status.`,
-        page: 1
+        text: `PDF processing temporarily unavailable. Error: ${errorMessage}. The system will continue with basic text extraction. Please check OCR Worker deployment status.`
       }], 
       pages: 1 
     };
@@ -791,7 +790,7 @@ export const processExtractionJob = action({
       console.log("DEBUG: Domain classified as:", finalClassification.domain, 
                   "confidence:", finalClassification.confidence);
       
-      // Store classification
+      // Store classification with properly formatted evidence
       await ctx.runMutation(api.pipeline.insertDomainClassification as any, {
         documentId: (document as any)._id as Id<"documents">,
         domain: finalClassification.domain,
@@ -799,7 +798,12 @@ export const processExtractionJob = action({
         method: finalClassification.method,
         alternativeDomains: finalClassification.alternative_domains || [],
         requiresConfirmation: finalClassification.requires_user_confirmation,
-        evidence: finalClassification.evidence,
+        evidence: {
+          primaryMatches: finalClassification.evidence.primaryMatches || [],
+          secondaryMatches: finalClassification.evidence.secondaryMatches || [],
+          sectionMatches: finalClassification.evidence.sectionMatches || [],
+          negativeMatches: finalClassification.evidence.negativeMatches || []
+        },
         createdAt: now()
       });
       

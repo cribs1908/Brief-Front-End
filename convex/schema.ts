@@ -81,15 +81,21 @@ export default defineSchema({
     .index("by_status", ["status"]),
 
   documents: defineTable({
-    jobId: v.id("jobs"),
-    filename: v.string(),
-    hash: v.string(),
+    jobId: v.union(v.id("jobs"), v.id("comparisonJobs")), // Support both new and legacy job IDs
+    filename: v.optional(v.string()), // Optional for backward compatibility  
+    hash: v.optional(v.string()), // Optional for backward compatibility
     pages: v.optional(v.number()),
     storageUrl: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
     mime: v.optional(v.string()),
     qualityScore: v.optional(v.number()),
-    createdAt: v.number(),
+    createdAt: v.optional(v.number()), // Optional for backward compatibility
+    // Legacy compatibility fields
+    vendorName: v.optional(v.string()),
+    sourceUri: v.optional(v.string()),
+    ingestedAt: v.optional(v.number()),
+    docType: v.optional(v.string()),
+    ocrUsed: v.optional(v.boolean()),
   }).index("by_job", ["jobId"])
     .index("by_hash", ["hash"]),
 
