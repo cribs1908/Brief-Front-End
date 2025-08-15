@@ -1,6 +1,6 @@
 import fs from 'fs';
 
-const CONVEX_URL = process.env.CONVEX_URL || "https://kindred-otter-506.convex.cloud";
+const CONVEX_URL = process.env.CONVEX_URL || "https://kindred-otter-506.convex.site";
 
 async function uploadPdfsAndTest() {
   try {
@@ -25,8 +25,7 @@ async function uploadPdfsAndTest() {
       
       uploadedPdfs.push({
         uri: fileUri,
-        vendor_hint: vendorHint,
-        filename: pdfPath.split('/').pop()
+        vendor_hint: vendorHint
       });
     }
     

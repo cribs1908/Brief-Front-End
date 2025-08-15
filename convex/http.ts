@@ -29,15 +29,29 @@ http.route({
       const body = await req.json();
       const { workspaceId, domainMode, domain } = body;
 
-      if (!workspaceId) {
-        return new Response(JSON.stringify({ error: "workspaceId is required" }), {
-          status: 400,
-          headers: createCorsHeaders(),
-        });
+      // Create default workspace if none provided (for legacy compatibility)
+      let finalWorkspaceId = workspaceId;
+      if (!finalWorkspaceId || finalWorkspaceId === "default_workspace_123") {
+        // Create or find default workspace
+        try {
+          finalWorkspaceId = await ctx.runMutation(api.workspaces.createDefaultWorkspaceForUser, {
+            userId: "default_user",
+          });
+        } catch (error) {
+          // Workspace might already exist, try to find it
+          const existing = await ctx.runQuery(api.workspaces.getUserWorkspaces, {
+            userId: "default_user"
+          });
+          if (existing && existing.length > 0) {
+            finalWorkspaceId = existing[0]._id;
+          } else {
+            throw new Error("Could not create or find default workspace");
+          }
+        }
       }
 
       const jobId = await ctx.runMutation(api.jobs.createJob, {
-        workspaceId: workspaceId as Id<"workspaces">,
+        workspaceId: finalWorkspaceId as Id<"workspaces">,
         domainMode: domainMode || "auto",
         domain,
       });
@@ -479,13 +493,6 @@ const optionsHandler = httpAction(async (_, request) => {
   return new Response();
 });
 
-// Universal OPTIONS handler for all API routes
-http.route({
-  path: "/api/*",
-  method: "OPTIONS",
-  handler: optionsHandler,
-});
-
 // === LEGACY API COMPATIBILITY ===
 
 http.route({
@@ -599,6 +606,22 @@ http.route({
   path: "/payments/webhook",
   method: "POST",
   handler: paymentWebhook,
+});
+
+// === CORS OPTIONS HANDLERS (MUST BE LAST) ===
+
+// Universal OPTIONS handler for all API routes
+http.route({
+  path: "/api/*",
+  method: "OPTIONS",
+  handler: optionsHandler,
+});
+
+// Catch-all OPTIONS handler
+http.route({
+  path: "/*",
+  method: "OPTIONS",
+  handler: optionsHandler,
 });
 
 export default http;

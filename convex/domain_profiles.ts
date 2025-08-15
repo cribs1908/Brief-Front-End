@@ -53,36 +53,52 @@ const SEMICONDUCTORS_PROFILE: DomainProfile = {
   version: "1.0",
   
   active_fields: [
-    // Identity
-    { section: "identity", field: "product_model", priority: 10, display_label: "Product/Model", required: true },
+    // Identity & Basic Specs (PRD Section 19 - Chip fields)
+    { section: "identity", field: "product_model", priority: 10, display_label: "Model", required: true },
+    { section: "identity", field: "cpu_architecture", priority: 9, display_label: "CPU Arch", required: false },
     { section: "identity", field: "form_factor", priority: 8, display_label: "Package", required: false },
     { section: "identity", field: "interfaces", priority: 7, display_label: "Interfaces", required: false },
     
-    // Performance
-    { section: "performance", field: "frequency_compute", priority: 10, display_label: "Frequency", required: false },
-    { section: "performance", field: "operating_range", priority: 9, display_label: "Operating Range", required: false },
-    { section: "performance", field: "accuracy", priority: 7, display_label: "Accuracy", required: false },
+    // Performance & Compute
+    { section: "performance", field: "frequency_max", priority: 10, display_label: "Max Freq", required: true },
+    { section: "performance", field: "flash_memory", priority: 9, display_label: "Flash/RAM", required: false },
+    { section: "performance", field: "peripherals", priority: 7, display_label: "Peripherals", required: false },
     
-    // Environment - CRITICO per chip
-    { section: "environment", field: "power_typical", priority: 10, display_label: "Supply Current", required: true },
-    { section: "environment", field: "power_max", priority: 9, display_label: "Max Current", required: false },
-    { section: "environment", field: "efficiency", priority: 8, display_label: "Efficiency", required: false },
-    { section: "environment", field: "temperature_range", priority: 10, display_label: "Operating Temperature", required: true },
+    // Power & Electrical
+    { section: "power", field: "power_typical", priority: 10, display_label: "Power typ", required: true },
+    { section: "power", field: "power_max", priority: 9, display_label: "Power max", required: false },
+    { section: "power", field: "supply_voltage", priority: 9, display_label: "Supply voltage", required: true },
+    
+    // Environmental & Operating Conditions
+    { section: "environment", field: "temperature_range", priority: 10, display_label: "Temp range", required: true },
+    
+    // Compliance & Quality
+    { section: "compliance", field: "certifications", priority: 7, display_label: "Certifications", required: false },
     
     // Economics
-    { section: "economics", field: "price_list", priority: 6, display_label: "Unit Price", required: false }
+    { section: "economics", field: "price_notes", priority: 6, display_label: "Price notes", required: false },
+    
+    // Additional Performance
+    { section: "performance", field: "accuracy", priority: 6, display_label: "Accuracy", required: false },
+    { section: "performance", field: "efficiency", priority: 6, display_label: "Efficiency", required: false }
   ],
   
   field_synonyms: {
-    "product_model": ["part number", "device", "IC", "component", "model", "product name"],
-    "frequency_compute": ["clock frequency", "operating frequency", "max frequency", "frequency", "clock", "MHz", "GHz"],
-    "power_typical": ["supply current", "quiescent current", "IQ", "operating current", "current consumption", "ICC", "IDD"],
-    "power_max": ["maximum current", "peak current", "max supply current"],
-    "temperature_range": ["operating temperature", "temperature range", "ambient temperature", "TA", "TJ", "junction temperature"],
-    "form_factor": ["package", "package type", "form factor", "enclosure", "housing"],
-    "interfaces": ["communication", "interface", "protocol", "I2C", "SPI", "UART", "GPIO", "analog"],
-    "accuracy": ["accuracy", "precision", "error", "INL", "DNL", "THD", "SINAD"],
-    "efficiency": ["efficiency", "power efficiency", "conversion efficiency"]
+    "product_model": ["part number", "device", "IC", "component", "model", "product name", "chip model", "part", "device name"],
+    "cpu_architecture": ["architecture", "CPU arch", "processor architecture", "core", "ARM", "x86", "RISC-V", "instruction set"],
+    "frequency_max": ["max frequency", "clock frequency", "operating frequency", "frequency", "clock", "MHz", "GHz", "maximum frequency"],
+    "flash_memory": ["flash", "memory", "flash size", "RAM", "ROM", "storage", "flash memory", "program memory", "KB", "MB"],
+    "peripherals": ["peripherals", "I/O", "GPIO", "timers", "ADC", "DAC", "PWM", "communication interfaces"],
+    "power_typical": ["supply current", "quiescent current", "IQ", "operating current", "current consumption", "ICC", "IDD", "typical power"],
+    "power_max": ["maximum current", "peak current", "max supply current", "maximum power", "peak power"],
+    "supply_voltage": ["supply voltage", "VDD", "VCC", "operating voltage", "voltage range", "V", "supply"],
+    "temperature_range": ["operating temperature", "temperature range", "ambient temperature", "TA", "TJ", "junction temperature", "temp range"],
+    "form_factor": ["package", "package type", "form factor", "enclosure", "housing", "pin count"],
+    "interfaces": ["communication", "interface", "protocol", "I2C", "SPI", "UART", "GPIO", "analog", "digital interfaces"],
+    "certifications": ["certifications", "compliance", "standards", "regulatory", "CE", "FCC", "RoHS", "automotive grade"],
+    "price_notes": ["price", "cost", "pricing", "unit price", "price per unit", "cost notes", "$", "USD"],
+    "accuracy": ["accuracy", "precision", "error", "INL", "DNL", "THD", "SINAD", "linearity"],
+    "efficiency": ["efficiency", "power efficiency", "conversion efficiency", "performance efficiency"]
   },
   
   priority_sections: [
@@ -99,14 +115,18 @@ const SEMICONDUCTORS_PROFILE: DomainProfile = {
     "power_typical": "typ",
     "power_max": "max", 
     "temperature_range": "range",
-    "frequency_compute": "max",
-    "accuracy": "typ"
+    "frequency_max": "max",
+    "supply_voltage": "typ",
+    "accuracy": "typ",
+    "efficiency": "typ"
   },
   
   unit_targets: {
     "power_typical": "mA",
     "power_max": "mA", 
-    "frequency_compute": "MHz",
+    "frequency_max": "MHz",
+    "flash_memory": "KB",
+    "supply_voltage": "V",
     "temperature_range": "°C",
     "accuracy": "percent",
     "efficiency": "percent"
@@ -125,15 +145,28 @@ const SEMICONDUCTORS_PROFILE: DomainProfile = {
       "BGA": "BGA", 
       "TSSOP": "TSSOP",
       "SOIC": "SOIC",
-      "DIP": "DIP"
+      "DIP": "DIP",
+      "QFP": "QFP",
+      "LQFP": "LQFP"
+    },
+    "cpu_architecture": {
+      "arm": "ARM",
+      "ARM Cortex": "ARM Cortex",
+      "x86": "x86",
+      "risc-v": "RISC-V",
+      "RISC V": "RISC-V"
     }
   },
   
   validation_thresholds: {
     "power_typical": { min: 0.001, max: 1000, expected_units: ["mA", "µA", "A"] },
     "power_max": { min: 0.001, max: 5000, expected_units: ["mA", "µA", "A"] },
-    "frequency_compute": { min: 0.001, max: 10000, expected_units: ["MHz", "GHz", "Hz", "kHz"] },
-    "temperature_range": { min: -273, max: 200, expected_units: ["°C", "K"] }
+    "frequency_max": { min: 0.001, max: 10000, expected_units: ["MHz", "GHz", "Hz", "kHz"] },
+    "flash_memory": { min: 1, max: 1000000, expected_units: ["KB", "MB", "GB", "bytes"] },
+    "supply_voltage": { min: 0.1, max: 50, expected_units: ["V", "mV"] },
+    "temperature_range": { min: -273, max: 200, expected_units: ["°C", "K"] },
+    "accuracy": { min: 0.001, max: 100, expected_units: ["percent", "%", "ppm"] },
+    "efficiency": { min: 1, max: 100, expected_units: ["percent", "%"] }
   },
   
   section_selectors: {
@@ -339,20 +372,106 @@ const SOFTWARE_B2B_PROFILE: DomainProfile = {
   }
 };
 
+// Profilo API & SDK (PRD Section 19 - API fields)
+const API_PROFILE: DomainProfile = {
+  domain: SUPPORTED_DOMAINS.API_SDK,
+  version: "1.0",
+  
+  active_fields: [
+    // API Fundamentals (PRD Section 19 - API fields)
+    { section: "api", field: "base_url", priority: 10, display_label: "Base URL", required: true },
+    { section: "api", field: "auth_methods", priority: 9, display_label: "Auth", required: true },
+    { section: "api", field: "rate_limit", priority: 9, display_label: "Rate limit", required: false },
+    { section: "api", field: "latency_p95", priority: 8, display_label: "Latency p95", required: false },
+    
+    // Service & Reliability
+    { section: "service", field: "sla_uptime", priority: 10, display_label: "SLA", required: false },
+    { section: "service", field: "regions", priority: 7, display_label: "Regions", required: false },
+    { section: "service", field: "sdks_supported", priority: 8, display_label: "SDKs", required: false },
+    { section: "service", field: "webhooks", priority: 6, display_label: "Webhooks", required: false },
+    
+    // Data & Compliance
+    { section: "compliance", field: "data_residency", priority: 7, display_label: "Data residency", required: false },
+    { section: "compliance", field: "compliance_certs", priority: 8, display_label: "Compliance", required: false },
+    
+    // Pricing & Limits
+    { section: "pricing", field: "pricing_basis", priority: 9, display_label: "Pricing basis", required: false },
+    { section: "pricing", field: "quotas_burst", priority: 7, display_label: "Quotas/burst", required: false }
+  ],
+  
+  field_synonyms: {
+    "base_url": ["base URL", "endpoint", "API endpoint", "service URL", "host", "domain"],
+    "auth_methods": ["authentication", "auth", "authorization", "API key", "OAuth", "bearer token", "JWT"],
+    "rate_limit": ["rate limit", "API limit", "throttling", "requests per second", "requests/min"],
+    "latency_p95": ["latency", "response time", "p95", "performance", "speed", "API latency"],
+    "sla_uptime": ["SLA", "uptime", "availability", "service level", "guaranteed uptime"],
+    "regions": ["regions", "locations", "data centers", "geographical coverage"],
+    "sdks_supported": ["SDKs", "libraries", "client libraries", "programming languages"],
+    "webhooks": ["webhooks", "callbacks", "push notifications", "event notifications"],
+    "data_residency": ["data residency", "data location", "data sovereignty"],
+    "compliance_certs": ["compliance", "certifications", "SOC2", "GDPR", "HIPAA"],
+    "pricing_basis": ["pricing model", "billing", "cost structure", "pricing tiers"],
+    "quotas_burst": ["quotas", "limits", "burst capacity", "usage limits"]
+  },
+  
+  priority_sections: [
+    "api documentation",
+    "authentication", 
+    "rate limiting",
+    "pricing",
+    "service level agreement",
+    "regions and availability",
+    "compliance"
+  ],
+  
+  range_rules: {
+    "rate_limit": "max",
+    "latency_p95": "typ",
+    "sla_uptime": "min"
+  },
+  
+  unit_targets: {
+    "rate_limit": "req/s",
+    "latency_p95": "ms", 
+    "sla_uptime": "percent"
+  },
+  
+  canonicalizations: {
+    "auth_methods": {
+      "api key": "API Key",
+      "oauth": "OAuth",
+      "jwt": "JWT",
+      "bearer": "Bearer Token"
+    }
+  },
+  
+  validation_thresholds: {
+    "rate_limit": { min: 1, max: 1000000, expected_units: ["req/s", "req/min"] },
+    "latency_p95": { min: 1, max: 10000, expected_units: ["ms", "s"] },
+    "sla_uptime": { min: 90, max: 100, expected_units: ["percent", "%"] }
+  },
+  
+  section_selectors: {
+    "api": ["API reference", "endpoints", "API documentation"],
+    "auth": ["authentication", "authorization", "security"],
+    "pricing": ["pricing", "billing", "costs", "plans"]
+  }
+};
+
 // Registry di tutti i profili
 export const DOMAIN_PROFILES: Record<Domain, DomainProfile> = {
   [SUPPORTED_DOMAINS.SEMICONDUCTORS]: SEMICONDUCTORS_PROFILE,
   [SUPPORTED_DOMAINS.NETWORKING]: NETWORKING_PROFILE,
   [SUPPORTED_DOMAINS.SOFTWARE_B2B]: SOFTWARE_B2B_PROFILE,
+  [SUPPORTED_DOMAINS.API_SDK]: API_PROFILE,
   
-  // TODO: Implementare altri profili
-  [SUPPORTED_DOMAINS.COMPUTE_STORAGE]: SOFTWARE_B2B_PROFILE, // Placeholder
-  [SUPPORTED_DOMAINS.ENERGY]: SEMICONDUCTORS_PROFILE, // Placeholder - simile a chip
-  [SUPPORTED_DOMAINS.INDUSTRIAL]: SEMICONDUCTORS_PROFILE, // Placeholder
+  // TODO: Implement remaining profiles
+  [SUPPORTED_DOMAINS.COMPUTE_STORAGE]: SOFTWARE_B2B_PROFILE, // TODO: Create STORAGE_PROFILE
+  [SUPPORTED_DOMAINS.ENERGY]: SEMICONDUCTORS_PROFILE, // TODO: Create ENERGY_PROFILE  
+  [SUPPORTED_DOMAINS.INDUSTRIAL]: SEMICONDUCTORS_PROFILE, // TODO: Create INDUSTRIAL_PROFILE
   [SUPPORTED_DOMAINS.MEDICAL]: SEMICONDUCTORS_PROFILE, // Placeholder
-  [SUPPORTED_DOMAINS.API_SDK]: SOFTWARE_B2B_PROFILE, // Placeholder - simile a SaaS
-  [SUPPORTED_DOMAINS.SECURITY]: SOFTWARE_B2B_PROFILE, // Placeholder
-  [SUPPORTED_DOMAINS.TELCO_EDGE]: NETWORKING_PROFILE // Placeholder - simile a networking
+  [SUPPORTED_DOMAINS.SECURITY]: SOFTWARE_B2B_PROFILE, // TODO: Create SECURITY_PROFILE
+  [SUPPORTED_DOMAINS.TELCO_EDGE]: NETWORKING_PROFILE // Similar to networking
 };
 
 /**

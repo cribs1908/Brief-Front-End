@@ -392,11 +392,103 @@ export const seedSynonymMapV1 = mutation({
     if (existing) return existing;
     const version = `v1-${Date.now()}`;
     const entries = [
-      // Performance metrics
+      // === CHIP/SEMICONDUCTOR METRICS ===
+      {
+        canonicalMetricId: "CHIP_MODEL",
+        metricLabel: "Model",
+        synonyms: ["model", "product model", "part number", "device", "IC", "component", "chip model", "part", "device name", "modelo", "modello", "modèle", "型号"],
+        unitRules: { base: "text" },
+        priority: 10,
+        optimality: undefined,
+      },
+      {
+        canonicalMetricId: "CHIP_FREQUENCY_MAX",
+        metricLabel: "Max Freq (MHz)",
+        synonyms: ["max frequency", "clock frequency", "operating frequency", "frequency", "clock", "MHz", "GHz", "maximum frequency", "frecuencia máxima", "fréquence maximale", "最大频率"],
+        unitRules: { base: "MHz", conversions: { "GHz": 1000, "kHz": 0.001, "Hz": 0.000001 } },
+        priority: 10,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "CHIP_POWER_TYPICAL",
+        metricLabel: "Supply Current (mA)",
+        synonyms: ["supply current", "quiescent current", "IQ", "operating current", "current consumption", "ICC", "IDD", "typical power", "corriente de alimentación", "courant d'alimentation", "电源电流"],
+        unitRules: { base: "mA", conversions: { "µA": 0.001, "A": 1000 } },
+        priority: 10,
+        optimality: "min",
+      },
+      {
+        canonicalMetricId: "CHIP_SUPPLY_VOLTAGE",
+        metricLabel: "Supply Voltage (V)",
+        synonyms: ["supply voltage", "VDD", "VCC", "operating voltage", "voltage range", "V", "supply", "tensión de alimentación", "tension d'alimentation", "电源电压"],
+        unitRules: { base: "V", conversions: { "mV": 0.001 } },
+        priority: 9,
+        optimality: undefined,
+      },
+      {
+        canonicalMetricId: "CHIP_TEMPERATURE_RANGE",
+        metricLabel: "Temperature Range (°C)",
+        synonyms: ["operating temperature", "temperature range", "ambient temperature", "TA", "TJ", "junction temperature", "temp range", "rango de temperatura", "plage de température", "工作温度"],
+        unitRules: { base: "°C", conversions: { "K": -273.15, "°F": "(°F-32)/1.8" } },
+        priority: 10,
+        optimality: undefined,
+      },
+      {
+        canonicalMetricId: "CHIP_FLASH_MEMORY",
+        metricLabel: "Flash/RAM (KB)",
+        synonyms: ["flash", "memory", "flash size", "RAM", "ROM", "storage", "flash memory", "program memory", "KB", "MB", "memoria flash", "mémoire flash", "闪存"],
+        unitRules: { base: "KB", conversions: { "MB": 1024, "GB": 1048576, "bytes": 0.001 } },
+        priority: 9,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "CHIP_PACKAGE",
+        metricLabel: "Package",
+        synonyms: ["package", "package type", "form factor", "enclosure", "housing", "pin count", "empaque", "boîtier", "封装"],
+        unitRules: { base: "text" },
+        priority: 8,
+        optimality: undefined,
+      },
+      
+      // === API METRICS ===
+      {
+        canonicalMetricId: "API_BASE_URL",
+        metricLabel: "Base URL",
+        synonyms: ["base URL", "endpoint", "API endpoint", "service URL", "host", "domain", "URL base", "URL de base", "基础URL"],
+        unitRules: { base: "text" },
+        priority: 10,
+        optimality: undefined,
+      },
+      {
+        canonicalMetricId: "API_RATE_LIMIT",
+        metricLabel: "Rate Limit (req/s)",
+        synonyms: ["rate limit", "API limit", "throttling", "requests per second", "requests/min", "calls/hour", "límite de velocidad", "limite de débit", "请求限制"],
+        unitRules: { base: "req/s", conversions: { "req/min": 0.0167, "req/hour": 0.000278 } },
+        priority: 9,
+        optimality: "max",
+      },
+      {
+        canonicalMetricId: "API_LATENCY_P95",
+        metricLabel: "Latency p95 (ms)",
+        synonyms: ["latency", "response time", "p95", "performance", "speed", "API latency", "average response time", "latencia", "latence", "延迟"],
+        unitRules: { base: "ms", conversions: { "s": 1000, "µs": 0.001 } },
+        priority: 8,
+        optimality: "min",
+      },
+      {
+        canonicalMetricId: "API_AUTH_METHODS",
+        metricLabel: "Authentication",
+        synonyms: ["authentication", "auth", "authorization", "API key", "OAuth", "bearer token", "JWT", "autenticación", "authentification", "认证"],
+        unitRules: { base: "text" },
+        priority: 9,
+        optimality: undefined,
+      },
+      
+      // === GENERAL PERFORMANCE METRICS ===
       {
         canonicalMetricId: "THROUGHPUT_RPS",
         metricLabel: "Throughput (req/s)",
-        synonyms: ["throughput", "req/s", "requests per second", "rps", "requests/sec", "request rate", "firewall throughput", "firewall throughput (gbps)", "network throughput", "data throughput"],
+        synonyms: ["throughput", "req/s", "requests per second", "rps", "requests/sec", "request rate", "firewall throughput", "network throughput", "data throughput", "rendimiento", "débit", "吞吐量"],
         unitRules: { base: "rps", conversions: { "requests/sec": 1, "req/min": 0.0167, "gbps": 1000000000, "mbps": 1000000, "kbps": 1000 } },
         priority: 10,
         optimality: "max",
@@ -404,7 +496,7 @@ export const seedSynonymMapV1 = mutation({
       {
         canonicalMetricId: "LATENCY_MS",
         metricLabel: "Latency (ms)",
-        synonyms: ["latency", "response time", "rt", "delay", "response latency", "network latency", "processing delay", "packet delay"],
+        synonyms: ["latency", "response time", "rt", "delay", "response latency", "network latency", "processing delay", "packet delay", "latencia", "latence", "延迟"],
         unitRules: { base: "ms", conversions: { "s": 1000, "us": 0.001 } },
         priority: 10,
         optimality: "min",
@@ -445,7 +537,7 @@ export const seedSynonymMapV1 = mutation({
       {
         canonicalMetricId: "MONTHLY_PRICE_USD",
         metricLabel: "Monthly Price ($)",
-        synonyms: ["price", "pricing", "cost", "monthly cost", "subscription price", "plan price"],
+        synonyms: ["price", "pricing", "cost", "monthly cost", "subscription price", "plan price", "precio", "prix", "价格", "monthly", "mensual", "mensuel", "月费"],
         unitRules: { base: "USD", conversions: { "EUR": 1.1, "GBP": 1.25 } },
         priority: 9,
         optimality: "min",
@@ -462,7 +554,7 @@ export const seedSynonymMapV1 = mutation({
       {
         canonicalMetricId: "UPTIME_SLA_PERCENT",
         metricLabel: "Uptime SLA (%)",
-        synonyms: ["uptime", "sla", "availability", "uptime guarantee", "service level"],
+        synonyms: ["uptime", "sla", "availability", "uptime guarantee", "service level", "disponibilidad", "disponibilité", "正常运行时间", "tiempo de actividad"],
         unitRules: { base: "percent" },
         priority: 10,
         optimality: "max",
@@ -470,7 +562,7 @@ export const seedSynonymMapV1 = mutation({
       {
         canonicalMetricId: "SOC2_COMPLIANCE",
         metricLabel: "SOC2",
-        synonyms: ["soc2", "soc 2", "soc2 compliant", "soc2 certified"],
+        synonyms: ["soc2", "soc 2", "soc2 compliant", "soc2 certified", "cumplimiento soc2", "conformité soc2", "SOC2合规"],
         unitRules: { base: "boolean" },
         priority: 8,
         optimality: "max",
@@ -533,7 +625,7 @@ export const createComparisonJob = action({
     pdf_list: v.array(
       v.object({
         uri: v.optional(v.string()),
-        storageId: v.optional(v.id("_storage")),
+        storageId: v.optional(v.union(v.id("_storage"), v.string())), // Allow both storage ID and string
         vendor_hint: v.optional(v.string()),
       })
     ),
@@ -557,8 +649,19 @@ export const createComparisonJob = action({
       // Resolve URI: prefer provided uri, otherwise generate from storageId
       let resolvedUri: string | undefined = spec.uri;
       if (!resolvedUri && spec.storageId) {
-        const tmpUrl = await ctx.storage.getUrl(spec.storageId);
-        resolvedUri = tmpUrl ?? undefined;
+        // Try to get URL from Convex storage if storageId looks like a storage ID
+        if (typeof spec.storageId === 'string' && spec.storageId.startsWith('k')) {
+          try {
+            const tmpUrl = await ctx.storage.getUrl(spec.storageId as any);
+            resolvedUri = tmpUrl ?? undefined;
+          } catch (error) {
+            console.warn("Failed to resolve storageId to URL, treating as literal URI:", spec.storageId);
+            resolvedUri = spec.storageId;
+          }
+        } else {
+          // For non-storage IDs, treat as literal URI
+          resolvedUri = String(spec.storageId);
+        }
       }
       const docId = await ctx.runMutation(api.pipeline.insertDocument, {
         jobId: jobId as Id<"comparisonJobs">,
