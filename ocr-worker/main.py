@@ -1,7 +1,7 @@
 """
-OCR Worker Serverless
-Gestisce PDF da 6MB+ con pipeline OCR + Tabula
-Segue architettura applogicprd.md
+OCR Worker Serverless - Production Ready
+Gestisce PDF da 6MB+ con pipeline Google Cloud Vision + Tabula
+Segue architettura applogicprd.md con tecnologie enterprise-grade
 """
 
 import os
@@ -9,19 +9,28 @@ import io
 import json
 import tempfile
 from flask import Flask, request, jsonify
-import pytesseract
+try:
+    from google.cloud import vision
+    from google.cloud import documentai
+    GOOGLE_CLOUD_AVAILABLE = True
+except ImportError:
+    print("Warning: Google Cloud libraries not available")
+    GOOGLE_CLOUD_AVAILABLE = False
 from pdf2image import convert_from_path
 import tabula
 import pandas as pd
 import requests
 from PIL import Image
+import PyPDF2
 
 app = Flask(__name__)
 
-# Configuration
-MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB limit for B2B docs
-TESSERACT_CONFIG = r'--oem 3 --psm 6'
+# Configuration - Production Ready
+MAX_PDF_SIZE = 100 * 1024 * 1024  # 100MB limit for large B2B docs
 DPI = 200  # High quality per documenti tecnici
+GOOGLE_CLOUD_PROJECT = os.environ.get('GOOGLE_CLOUD_PROJECT', 'crafty-tracker-469021-k8')
+DOCUMENT_AI_PROCESSOR_ID = os.environ.get('DOCUMENT_AI_PROCESSOR_ID')
+USE_DOCUMENT_AI = bool(DOCUMENT_AI_PROCESSOR_ID)
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -63,21 +72,32 @@ def process_pdf():
             tables = extract_tables_with_tabula(pdf_path)
             print(f"Tabula extracted {len(tables)} tables")
             
-            # Step 2: OCR for scanned content
-            text_blocks = extract_text_with_ocr(pdf_path)
-            print(f"OCR extracted {len(text_blocks)} text blocks")
+            # Step 2: Google Cloud Vision/Document AI for text extraction
+            if GOOGLE_CLOUD_AVAILABLE and USE_DOCUMENT_AI:
+                text_blocks = extract_text_with_document_ai(pdf_data)
+                extraction_method = "document_ai+tabula"
+            elif GOOGLE_CLOUD_AVAILABLE:
+                text_blocks = extract_text_with_vision_api(pdf_path)
+                extraction_method = "vision_api+tabula"
+            else:
+                # Fallback to PyPDF2 for testing/local development
+                text_blocks = extract_text_with_pypdf2(pdf_path)
+                extraction_method = "pypdf2+tabula"
+            
+            print(f"Text extraction completed: {len(text_blocks)} text blocks using {extraction_method}")
             
             # Step 3: Combine and structure results
             result = {
                 "pages": max(1, len(text_blocks)),
-                "extraction_method": "ocr+tabula",
+                "extraction_method": extraction_method,
                 "extraction_quality": calculate_quality(text_blocks, tables),
                 "tables": tables,
                 "text_blocks": text_blocks,
                 "logs": [
                     f"Processed {len(pdf_data)} bytes",
                     f"Found {len(tables)} tables via Tabula",
-                    f"Extracted {len(text_blocks)} text blocks via OCR"
+                    f"Extracted {len(text_blocks)} text blocks via Google Cloud",
+                    f"Using extraction method: {extraction_method}"
                 ]
             }
             
@@ -152,54 +172,223 @@ def extract_tables_with_tabula(pdf_path: str) -> list:
         
     return tables
 
-def extract_text_with_ocr(pdf_path: str) -> list:
+def extract_text_with_vision_api(pdf_path: str) -> list:
     """
-    Extract text using OCR for scanned PDFs
-    High quality extraction for technical documents
+    Extract text using Google Cloud Vision API
+    Production-ready OCR for B2B technical documents
     """
     text_blocks = []
     
     try:
-        # Convert PDF to images
+        # Initialize Vision API client
+        client = vision.ImageAnnotatorClient()
+        
+        # Convert PDF to images - process all pages for complete B2B document extraction
         images = convert_from_path(
             pdf_path, 
             dpi=DPI,
-            first_page=1,
-            last_page=20  # Limit to first 20 pages for large docs
+            first_page=1
+            # No page limit for complete B2B documents
         )
         
         for page_num, image in enumerate(images, 1):
             try:
-                # Extract text using Tesseract
-                text = pytesseract.image_to_string(
-                    image, 
-                    config=TESSERACT_CONFIG,
-                    lang='eng+ita'
-                )
+                # Convert PIL image to bytes
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='PNG')
+                img_byte_arr = img_byte_arr.getvalue()
                 
-                # Clean and structure text
-                cleaned_text = clean_ocr_text(text)
+                # Create Vision API image object
+                vision_image = vision.Image(content=img_byte_arr)
                 
-                if cleaned_text and len(cleaned_text) > 20:
-                    text_blocks.append({
-                        "page": page_num,
-                        "text": cleaned_text[:2000],  # Limit text per page
-                        "extraction_method": "tesseract_ocr"
-                    })
+                # Extract text using Vision API
+                response = client.text_detection(image=vision_image)
+                texts = response.text_annotations
+                
+                if texts:
+                    # Use the full text detection (first result)
+                    full_text = texts[0].description
+                    cleaned_text = clean_ocr_text(full_text)
+                    
+                    if cleaned_text and len(cleaned_text) > 20:
+                        text_blocks.append({
+                            "page": page_num,
+                            "text": cleaned_text[:4000],  # Increased limit for B2B docs
+                            "extraction_method": "google_vision_api",
+                            "confidence": calculate_vision_confidence(texts)
+                        })
+                else:
+                    print(f"No text detected on page {page_num}")
+                    
+                # Check for errors
+                if response.error.message:
+                    raise Exception(f"Vision API error: {response.error.message}")
                     
             except Exception as e:
-                print(f"OCR failed for page {page_num}: {str(e)}")
+                print(f"Vision API failed for page {page_num}: {str(e)}")
                 text_blocks.append({
                     "page": page_num,
-                    "text": f"OCR extraction failed for page {page_num}: {str(e)}",
+                    "text": f"Vision API extraction failed for page {page_num}: {str(e)}",
                     "extraction_method": "error"
                 })
                 
     except Exception as e:
-        print(f"PDF to image conversion failed: {str(e)}")
+        print(f"Vision API processing failed: {str(e)}")
         text_blocks.append({
             "page": 1,
-            "text": f"Could not convert PDF to images: {str(e)}",
+            "text": f"Could not process with Vision API: {str(e)}",
+            "extraction_method": "error"
+        })
+        
+    return text_blocks
+
+def extract_text_with_document_ai(pdf_data: bytes) -> list:
+    """
+    Extract text using Google Cloud Document AI
+    Enterprise-grade document processing for structured B2B documents
+    """
+    text_blocks = []
+    
+    try:
+        # Initialize Document AI client
+        client = documentai.DocumentProcessorServiceClient()
+        
+        # Create the processor name
+        processor_name = f"projects/{GOOGLE_CLOUD_PROJECT}/locations/us/processors/{DOCUMENT_AI_PROCESSOR_ID}"
+        
+        # Create request
+        request = documentai.ProcessRequest(
+            name=processor_name,
+            raw_document=documentai.RawDocument(
+                content=pdf_data,
+                mime_type="application/pdf"
+            )
+        )
+        
+        # Process document
+        result = client.process_document(request=request)
+        document = result.document
+        
+        # Extract text blocks by page
+        if document.pages:
+            for page_num, page in enumerate(document.pages, 1):
+                page_text = ""
+                
+                # Extract paragraphs
+                if page.paragraphs:
+                    for paragraph in page.paragraphs:
+                        # Get text from layout
+                        paragraph_text = get_text_from_layout(document.text, paragraph.layout)
+                        page_text += paragraph_text + "\n"
+                
+                # Extract tables separately (Document AI finds tables automatically)
+                if page.tables:
+                    for table in page.tables:
+                        table_text = extract_table_text_from_document_ai(document.text, table)
+                        page_text += f"\n[TABLE]\n{table_text}\n[/TABLE]\n"
+                
+                # Clean and add to results
+                cleaned_text = clean_ocr_text(page_text)
+                if cleaned_text and len(cleaned_text) > 20:
+                    text_blocks.append({
+                        "page": page_num,
+                        "text": cleaned_text[:4000],
+                        "extraction_method": "google_document_ai",
+                        "confidence": 0.95  # Document AI is very reliable
+                    })
+        else:
+            # Fallback: extract all text
+            cleaned_text = clean_ocr_text(document.text)
+            if cleaned_text:
+                text_blocks.append({
+                    "page": 1,
+                    "text": cleaned_text[:4000],
+                    "extraction_method": "google_document_ai_fallback"
+                })
+                
+    except Exception as e:
+        print(f"Document AI processing failed: {str(e)}")
+        text_blocks.append({
+            "page": 1,
+            "text": f"Could not process with Document AI: {str(e)}",
+            "extraction_method": "error"
+        })
+        
+    return text_blocks
+
+def calculate_vision_confidence(annotations) -> float:
+    """Calculate average confidence from Vision API annotations"""
+    if not annotations or len(annotations) < 2:
+        return 0.8  # Default confidence
+    
+    # Skip first annotation (full text) and calculate from individual words
+    word_annotations = annotations[1:]
+    if not word_annotations:
+        return 0.8
+        
+    total_confidence = sum(getattr(ann, 'confidence', 0.8) for ann in word_annotations)
+    return min(1.0, total_confidence / len(word_annotations))
+
+def get_text_from_layout(document_text: str, layout) -> str:
+    """Extract text from Document AI layout object"""
+    text = ""
+    for segment in layout.text_anchor.text_segments:
+        start_index = int(segment.start_index) if segment.start_index else 0
+        end_index = int(segment.end_index) if segment.end_index else len(document_text)
+        text += document_text[start_index:end_index]
+    return text
+
+def extract_table_text_from_document_ai(document_text: str, table) -> str:
+    """Extract table content from Document AI table object"""
+    table_text = ""
+    for row in table.body_rows:
+        row_text = []
+        for cell in row.cells:
+            cell_text = get_text_from_layout(document_text, cell.layout).strip()
+            row_text.append(cell_text)
+        table_text += "\t".join(row_text) + "\n"
+    return table_text
+
+def extract_text_with_pypdf2(pdf_path: str) -> list:
+    """
+    Fallback text extraction using PyPDF2
+    Used for local development and testing when Google Cloud is not available
+    """
+    text_blocks = []
+    
+    try:
+        with open(pdf_path, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            
+            for page_num, page in enumerate(pdf_reader.pages, 1):
+                try:
+                    # Extract text from page
+                    text = page.extract_text()
+                    
+                    # Clean and structure text
+                    cleaned_text = clean_ocr_text(text)
+                    
+                    if cleaned_text and len(cleaned_text) > 20:
+                        text_blocks.append({
+                            "page": page_num,
+                            "text": cleaned_text[:4000],
+                            "extraction_method": "pypdf2_fallback",
+                            "confidence": 0.7  # Lower confidence for fallback method
+                        })
+                        
+                except Exception as e:
+                    print(f"PyPDF2 failed for page {page_num}: {str(e)}")
+                    text_blocks.append({
+                        "page": page_num,
+                        "text": f"PyPDF2 extraction failed for page {page_num}: {str(e)}",
+                        "extraction_method": "error"
+                    })
+                    
+    except Exception as e:
+        print(f"PyPDF2 processing failed: {str(e)}")
+        text_blocks.append({
+            "page": 1,
+            "text": f"Could not process with PyPDF2: {str(e)}",
             "extraction_method": "error"
         })
         
@@ -223,15 +412,20 @@ def clean_ocr_text(text: str) -> str:
     return ' '.join(filtered_words)
 
 def calculate_quality(text_blocks: list, tables: list) -> float:
-    """Calculate extraction quality score"""
+    """Calculate extraction quality score for B2B documents"""
     if not text_blocks and not tables:
         return 0.0
     
-    text_score = min(1.0, len(text_blocks) / 5)  # Up to 5 pages gets full score
-    table_score = min(1.0, len(tables) / 3)     # Up to 3 tables gets full score
+    # Improved scoring for larger B2B documents
+    text_score = min(1.0, len(text_blocks) / 10)  # Up to 10 pages gets full score for B2B docs
+    table_score = min(1.0, len(tables) / 5)      # Up to 5 tables gets full score for B2B docs
     
-    # Weight tables higher for B2B docs
-    return (text_score * 0.4) + (table_score * 0.6)
+    # Count valid content blocks (with substantial text)
+    valid_blocks = sum(1 for block in text_blocks if len(block.get('text', '')) > 100)
+    content_score = min(1.0, valid_blocks / 8)
+    
+    # Combined scoring weighted for B2B technical documents
+    return (text_score * 0.3) + (table_score * 0.4) + (content_score * 0.3)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))

@@ -1,19 +1,30 @@
-# Google Cloud Run configuration for OCR Worker
-# This ensures optimal performance for B2B PDF processing
+# Google Cloud Run configuration for OCR Worker - Production Ready
+# Enterprise-grade configuration for B2B PDF processing
 
 runtime: python311
 
-# Memory and CPU settings for handling large PDFs (6MB+)
+# Enhanced resources for Google Cloud Vision + Document AI processing
+automatic_scaling:
+  min_instances: 0
+  max_instances: 10
+  target_cpu_utilization: 0.8
+
+resources:
+  cpu: 2
+  memory_gb: 4
+
+# Environment variables for production
 env_variables:
-  # Tesseract configuration
-  TESSERACT_CONFIG: "--oem 3 --psm 6"
+  # Google Cloud configuration
+  GOOGLE_CLOUD_PROJECT: "crafty-tracker-469021-k8"
+  # DOCUMENT_AI_PROCESSOR_ID: "your-processor-id-here"  # Optional for Document AI
   
   # Processing limits for B2B documents
-  MAX_PDF_SIZE: "52428800"  # 50MB
+  MAX_PDF_SIZE: "104857600"  # 100MB for large B2B docs
   DPI: "200"
   
   # Timeout settings
-  PROCESSING_TIMEOUT: "300"  # 5 minutes
+  PROCESSING_TIMEOUT: "600"  # 10 minutes for complex documents
 
 # Health check
 liveness_check:

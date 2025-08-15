@@ -117,7 +117,8 @@ async function processPdfViaOcrWorker(ctx: any, storageId: string): Promise<{ ta
       tables: result.tables || [],
       textBlocks: (result.text_blocks || []).map((t: any, idx: number) => ({ 
         id: idx, 
-        text: String(t.text || '').slice(0, 2000) 
+        text: String(t.text || '').slice(0, 4000),  // Increased for B2B docs
+        page: t.page || idx + 1
       })),
       pages: result.pages || 1,
     };
@@ -125,12 +126,16 @@ async function processPdfViaOcrWorker(ctx: any, storageId: string): Promise<{ ta
   } catch (error: any) {
     console.error("DEBUG: OCR Worker processing failed:", error?.message || error);
     
-    // Fallback: return informative message about the B2B pipeline
+    // Enhanced fallback with better error information
+    const errorMessage = error?.message || 'Unknown error';
+    console.error("DEBUG: Full error details:", error);
+    
     return { 
       tables: [], 
       textBlocks: [{ 
         id: 0, 
-        text: `B2B PDF processing (OCR + Tabula) failed: ${error?.message || 'Unknown error'}. Large technical documents require the OCR Worker service. Please ensure it's deployed and configured correctly.` 
+        text: `PDF processing temporarily unavailable. Error: ${errorMessage}. This could be due to: 1) OCR Worker service not running, 2) PDF format issues, 3) Network connectivity. Please check the OCR Worker deployment status.`,
+        page: 1
       }], 
       pages: 1 
     };
@@ -698,9 +703,9 @@ export const processExtractionJob = action({
       const tables: any[] = processed.tables;
       const textBlocks = processed.textBlocks;
 
-      // Chunk data to respect Convex 1MB limit
-      const chunkedTextBlocks = chunkTextBlocks(textBlocks, 800000); // 800KB limit for safety
-      const chunkedTables = chunkTables(tables, 100000); // 100KB limit for tables
+      // Chunk data to respect Convex 1MB limit - optimized for B2B documents
+      const chunkedTextBlocks = chunkTextBlocks(textBlocks, 600000); // 600KB limit for larger docs
+      const chunkedTables = chunkTables(tables, 200000); // 200KB limit for complex tables
       
       console.log(`DEBUG: Chunked ${textBlocks.length} blocks into ${chunkedTextBlocks.length} chunks, ${tables.length} tables into ${chunkedTables.length} chunks`);
       
