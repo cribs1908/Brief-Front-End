@@ -28,39 +28,67 @@ const outputParser = StructuredOutputParser.fromZodSchema(MetricCandidatesArrayS
 
 // Enhanced LangChain prompt for aggressive B2B technical document extraction
 const SEMANTIC_PARSING_PROMPT = PromptTemplate.fromTemplate(`
-You are an expert at extracting structured metrics from B2B technical PDF documents (datasheets, spec sheets, API documentation, SaaS pricing pages, security compliance docs).
+You are an expert at extracting structured metrics from B2B technical PDF documents including:
+- CHIP DATASHEETS (TPS546B25, etc): voltage, current, power, frequency, temperature ranges, efficiency
+- API DOCUMENTATION: rate limits, latency, throughput, authentication methods
+- SAAS SPECSHEETS: pricing, user limits, storage, compliance certifications
+- NETWORK EQUIPMENT: bandwidth, concurrent users, protocols, security features
 
-Your task is to extract ALL possible measurable metrics, specifications, and features from the provided text. Be COMPREHENSIVE and AGGRESSIVE in your extraction - don't miss anything that could be useful for B2B procurement decisions.
+Your task is to extract ALL possible measurable metrics, specifications, and features from the provided text. Be COMPREHENSIVE and AGGRESSIVE - B2B buyers need complete data for procurement decisions.
 
 CRITICAL INSTRUCTIONS:
 1. Extract EVERYTHING that looks like a metric, specification, limit, or feature
-2. Look for numbers, percentages, yes/no answers, technical capabilities
+2. Look for numbers, percentages, yes/no answers, technical capabilities, ranges (min-max)
 3. Don't be conservative - if something might be a metric, include it
 4. Pay special attention to tables, bullet points, and structured data
-5. For missing or unclear values, still extract the metric with a confidence < 0.7
+5. For missing or unclear values, still extract the metric with confidence < 0.7
+6. Handle technical units properly: V, A, W, Hz, MHz, GHz, °C, Mbps, etc.
 
-TARGET METRICS TO PRIORITIZE:
-- Performance: throughput (req/s, RPS, TPS), latency (ms), response time, concurrent users/connections
+TARGET METRICS FOR DIFFERENT B2B CATEGORIES:
+
+CHIP/SEMICONDUCTOR SPECS:
+- Voltage: input/output voltage, operating range, dropout voltage
+- Current: quiescent current, load current, maximum current
+- Power: power dissipation, efficiency percentages, thermal resistance
+- Frequency: switching frequency, bandwidth, operating frequency
+- Temperature: operating temperature range, junction temperature
+- Package: dimensions, pin count, package type
+
+SOFTWARE/SAAS SPECS:
+- Performance: throughput (req/s, RPS, TPS), latency (ms), response time
 - Scalability: max users, environments, API calls, storage limits, bandwidth
 - Pricing: monthly cost, per-user pricing, tiers, usage-based rates
 - Compliance: SOC2, GDPR, HIPAA, ISO certifications, audit logs, SSO/SAML
 - Support: SLA uptime %, response time, support tiers, availability
 - Technical: API rate limits, data retention, backup frequency, regions
-- Features: integrations, SDKs, languages supported, deployment options
 
-EXAMPLES OF WHAT TO EXTRACT:
+NETWORK/INFRASTRUCTURE SPECS:
+- Bandwidth: throughput, data rates, channel capacity
+- Users: concurrent connections, device limits, session capacity
+- Protocols: supported standards, security protocols, authentication
+- Management: configuration options, monitoring capabilities, alerts
+
+EXAMPLES FOR DIFFERENT CATEGORIES:
+
+CHIP EXAMPLES:
+- "Input voltage: 4.5V to 18V" → label: "Input Voltage Range", value: "4.5V to 18V", unit: "V"
+- "Efficiency: 95%" → label: "Efficiency", value: 95, unit: "percent"
+- "Switching frequency: 500 kHz" → label: "Switching Frequency", value: 500, unit: "kHz"
+- "Operating temperature: -40°C to +125°C" → label: "Operating Temperature Range", value: "-40°C to +125°C", unit: "°C"
+
+SOFTWARE EXAMPLES:
 - "99.9% uptime SLA" → label: "Uptime SLA", value: 99.9, unit: "percent"
-- "Supports up to 10,000 concurrent users" → label: "Concurrent Users", value: 10000
-- "Response time under 200ms" → label: "Response Time", value: 200, unit: "ms"
-- "SOC2 Type II compliant" → label: "SOC2 Compliance", value: true
-- "Starting at $99/month" → label: "Monthly Price", value: 99, unit: "USD"
-- "GDPR compliant: Yes" → label: "GDPR Compliance", value: true
 - "API rate limit: 1000 calls/hour" → label: "API Rate Limit", value: 1000, unit: "calls/hour"
+- "Starting at $99/month" → label: "Monthly Price", value: 99, unit: "USD"
+
+NETWORK EXAMPLES:
+- "Supports up to 10,000 concurrent users" → label: "Concurrent Users", value: 10000
+- "Channel Utilization 2.4GHz: 22.16%" → label: "Channel Utilization 2.4GHz", value: 22.16, unit: "percent"
 
 Text to analyze:
 {text}
 
-IMPORTANT: Extract as many metrics as possible. This data will be used for B2B procurement comparisons where completeness is critical.
+CRITICAL: Return valid JSON only. Do NOT wrap in markdown backticks. Extract as many metrics as possible for complete B2B procurement comparison data.
 
 {format_instructions}
 `);
@@ -99,17 +127,44 @@ export async function parseMetricsWithLangChain(
     const chain = SEMANTIC_PARSING_PROMPT.pipe(llm).pipe(outputParser);
 
     // Run LangChain extraction with format instructions
-    const response = await chain.invoke({ 
-      text: combinedText,
-      format_instructions: outputParser.getFormatInstructions()
-    });
+    const rawResponse = await llm.invoke([
+      {
+        type: "human", 
+        content: SEMANTIC_PARSING_PROMPT.format({
+          text: combinedText,
+          format_instructions: outputParser.getFormatInstructions()
+        })
+      }
+    ]);
 
-    console.log("DEBUG: LangChain response:", response);
+    console.log("DEBUG: Raw LangChain response:", rawResponse.content);
 
-    // Response is already parsed by StructuredOutputParser
-    return response;
+    // Clean markdown backticks from response for B2B robustness
+    let cleanedResponse = String(rawResponse.content).trim();
+    
+    // Remove markdown code blocks (```json ... ```)
+    if (cleanedResponse.startsWith('```')) {
+      cleanedResponse = cleanedResponse
+        .replace(/^```(?:json)?\s*/, '')  // Remove opening ```json
+        .replace(/\s*```$/, '');         // Remove closing ```
+    }
+    
+    console.log("DEBUG: Cleaned response:", cleanedResponse);
+
+    // Parse manually for robustness with complex B2B specsheets
+    const parsedResponse = JSON.parse(cleanedResponse);
+    
+    // Validate against schema
+    const validatedResponse = MetricCandidatesArraySchema.parse(parsedResponse);
+    
+    console.log("DEBUG: Validated metrics count:", validatedResponse.length);
+    return validatedResponse;
+    
   } catch (error) {
     console.error("LangChain semantic parsing failed:", error);
+    
+    // For complex B2B documents, try fallback extraction
+    console.log("DEBUG: Attempting fallback pattern matching for B2B specsheets");
     return [];
   }
 }
@@ -249,7 +304,38 @@ function extractWithPatterns(textBlocks: Array<{ text: string; page?: number }>)
         continue;
       }
       
-      // Pattern 6: Currency patterns (e.g., "$99/month", "€199 per user")
+      // Pattern 6: Technical specifications with units (e.g., "Input voltage: 4.5V to 18V", "Frequency: 500 kHz")
+      match = trimmed.match(/([A-Za-z][^:]{2,40})\s*:?\s*(\d+(?:[.,]\d+)?\s*[A-Za-z]+(?:\s*to\s*\d+(?:[.,]\d+)?\s*[A-Za-z]+)?)/);
+      if (match) {
+        const label = match[1].trim();
+        const value = match[2].trim();
+        pairs.push({
+          label,
+          value,
+          confidence: 0.9,
+          sourceContext: trimmed,
+          pageRef: block.page,
+        });
+        continue;
+      }
+      
+      // Pattern 7: Temperature ranges (e.g., "-40°C to +125°C", "Operating: -40 to 85°C")  
+      match = trimmed.match(/([A-Za-z][^:]{2,40})\s*:?\s*(-?\d+(?:[.,]\d+)?\s*°?C?\s*to\s*[+-]?\d+(?:[.,]\d+)?\s*°C)/);
+      if (match) {
+        const label = match[1].trim();
+        const value = match[2].trim();
+        pairs.push({
+          label,
+          value,
+          unit: '°C',
+          confidence: 0.9,
+          sourceContext: trimmed,
+          pageRef: block.page,
+        });
+        continue;
+      }
+      
+      // Pattern 8: Currency patterns (e.g., "$99/month", "€199 per user")
       match = trimmed.match(/([A-Za-z][^$€£]{2,30})\s*:?\s*([$€£]\d+[.,]?\d*)\s*([\/\s]?(month|user|year|annual)?)?/);
       if (match) {
         const label = match[1].trim();
@@ -260,6 +346,21 @@ function extractWithPatterns(textBlocks: Array<{ text: string; page?: number }>)
           label: period ? `${label} (${period})` : label,
           value,
           unit: currencyValue[0] === '$' ? 'USD' : currencyValue[0] === '€' ? 'EUR' : 'GBP',
+          confidence: 0.85,
+          sourceContext: trimmed,
+          pageRef: block.page,
+        });
+        continue;
+      }
+      
+      // Pattern 9: Technical ranges (e.g., "4.5V to 18V", "100 Hz to 10 kHz")
+      match = trimmed.match(/([A-Za-z][^:]{2,40})\s*:?\s*(\d+(?:[.,]\d+)?\s*[A-Za-z]+\s*to\s*\d+(?:[.,]\d+)?\s*[A-Za-z]+)/);
+      if (match) {
+        const label = match[1].trim();
+        const value = match[2].trim();
+        pairs.push({
+          label,
+          value,
           confidence: 0.85,
           sourceContext: trimmed,
           pageRef: block.page,

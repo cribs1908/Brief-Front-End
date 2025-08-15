@@ -129,43 +129,108 @@ def download_pdf(url: str) -> bytes:
 def extract_tables_with_tabula(pdf_path: str) -> list:
     """
     Extract structured tables using Tabula
-    Perfect for native PDF tables in B2B documents
+    Enhanced for B2B technical documents (chip datasheets, API specs, SaaS features)
     """
     tables = []
     
     try:
-        # Use tabula to extract all tables
-        dfs = tabula.read_pdf(
-            pdf_path, 
-            pages='all',
-            multiple_tables=True,
-            pandas_options={'header': None}
-        )
+        # Enhanced Tabula extraction for complex B2B documents
+        # Use multiple strategies for robust table detection
+        extraction_strategies = [
+            # Strategy 1: Standard extraction (good for clean tables)
+            {
+                'pages': 'all',
+                'multiple_tables': True,
+                'pandas_options': {'header': None},
+                'strategy': 'standard'
+            },
+            # Strategy 2: Lattice mode (good for tables with visible borders)
+            {
+                'pages': 'all', 
+                'multiple_tables': True,
+                'lattice': True,
+                'pandas_options': {'header': None},
+                'strategy': 'lattice'
+            },
+            # Strategy 3: Stream mode (good for tables without borders)
+            {
+                'pages': 'all',
+                'multiple_tables': True, 
+                'stream': True,
+                'pandas_options': {'header': None},
+                'strategy': 'stream'
+            }
+        ]
         
-        for i, df in enumerate(dfs):
+        all_dfs = []
+        successful_strategy = None
+        
+        # Try each strategy and use the one that extracts most tables
+        for strategy in extraction_strategies:
+            try:
+                strategy_name = strategy.pop('strategy')
+                print(f"DEBUG: Trying Tabula strategy: {strategy_name}")
+                
+                dfs = tabula.read_pdf(pdf_path, **strategy)
+                if dfs and len(dfs) > len(all_dfs):
+                    all_dfs = dfs
+                    successful_strategy = strategy_name
+                    print(f"DEBUG: Strategy {strategy_name} found {len(dfs)} tables")
+                    
+            except Exception as e:
+                print(f"DEBUG: Strategy {strategy_name} failed: {e}")
+                continue
+        
+        print(f"DEBUG: Using best strategy: {successful_strategy} with {len(all_dfs)} tables")
+        
+        # Process tables with enhanced cleaning for B2B documents
+        for i, df in enumerate(all_dfs):
             if df.empty:
                 continue
                 
-            # Convert DataFrame to our format
+            # Enhanced table processing for technical documents
             rows = []
-            for _, row in df.iterrows():
-                cells = []
-                for value in row:
-                    # Clean cell values
-                    cell_text = str(value).strip() if pd.notna(value) else ""
-                    if cell_text and cell_text != 'nan':
-                        cells.append({"text": cell_text})
-                
-                if cells:  # Only add non-empty rows
-                    rows.append({"cells": cells})
+            header_detected = False
             
-            if rows:
+            for row_idx, (_, row) in enumerate(df.iterrows()):
+                cells = []
+                non_empty_cells = 0
+                
+                for col_idx, value in enumerate(row):
+                    # Enhanced cell cleaning for technical specs
+                    cell_text = str(value).strip() if pd.notna(value) else ""
+                    
+                    # Skip 'nan', 'NaN', empty strings
+                    if cell_text and cell_text.lower() not in ['nan', 'none', '']:
+                        # Clean technical specifications formatting
+                        cell_text = clean_technical_cell(cell_text)
+                        cells.append({
+                            "text": cell_text,
+                            "col": col_idx,
+                            "is_header": row_idx == 0 and not header_detected
+                        })
+                        non_empty_cells += 1
+                
+                # Only keep rows with sufficient content for B2B analysis
+                if non_empty_cells >= 1:  # At least 1 meaningful cell
+                    rows.append({
+                        "cells": cells,
+                        "row_type": "header" if row_idx == 0 and not header_detected else "data"
+                    })
+                    if row_idx == 0:
+                        header_detected = True
+            
+            # Only add tables with meaningful content
+            if rows and len(rows) >= 2:  # At least header + 1 data row
                 tables.append({
                     "page": i + 1,
-                    "table_id": f"tabula_{i}",
+                    "table_id": f"tabula_{successful_strategy}_{i}",
                     "rows": rows,
-                    "extraction_method": "tabula"
+                    "extraction_method": f"tabula_{successful_strategy}",
+                    "columns": len(rows[0]["cells"]) if rows else 0,
+                    "data_rows": len([r for r in rows if r["row_type"] == "data"])
                 })
+                print(f"DEBUG: Added table {i}: {len(rows)} rows, {len(rows[0]['cells']) if rows else 0} columns")
                 
     except Exception as e:
         print(f"Tabula extraction failed: {str(e)}")
@@ -393,6 +458,38 @@ def extract_text_with_pypdf2(pdf_path: str) -> list:
         })
         
     return text_blocks
+
+def clean_technical_cell(cell_text: str) -> str:
+    """Clean technical specification cells for B2B analysis"""
+    if not cell_text:
+        return ""
+    
+    # Remove extra whitespace
+    cleaned = ' '.join(cell_text.split())
+    
+    # Handle common technical formatting
+    # Example: "4.5 V to 18 V" should stay as is
+    # Example: "±5%" should stay as is
+    # Example: "TYP." should become "typical"
+    
+    replacements = {
+        'TYP.': 'typical',
+        'MIN.': 'minimum', 
+        'MAX.': 'maximum',
+        'NOM.': 'nominal',
+        'TYP': 'typical',
+        'MIN': 'minimum',
+        'MAX': 'maximum',
+        'NOM': 'nominal'
+    }
+    
+    cleaned_upper = cleaned.upper()
+    for old, new in replacements.items():
+        if old in cleaned_upper:
+            cleaned = cleaned.replace(old.lower(), new)
+            cleaned = cleaned.replace(old, new)
+    
+    return cleaned
 
 def clean_ocr_text(text: str) -> str:
     """Clean OCR output for better LangChain processing"""
