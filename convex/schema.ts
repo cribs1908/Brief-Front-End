@@ -329,4 +329,160 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_status", ["status"])
     .index("by_job", ["jobId"]),
+
+  // === GOLD SET VALIDATION ===
+  gold_set_annotations: defineTable({
+    pdf_name: v.string(),
+    pdf_url: v.optional(v.string()),
+    domain: v.string(),
+    vendor: v.string(),
+    annotated_by: v.string(),
+    annotation_date: v.string(),
+    confidence_level: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+    
+    // Ground truth metrics
+    ground_truth_metrics: v.array(v.object({
+      field: v.string(),
+      value: v.union(v.string(), v.number(), v.boolean()),
+      unit: v.optional(v.string()),
+      source_page: v.optional(v.number()),
+      source_context: v.string(),
+      extraction_difficulty: v.union(
+        v.literal("easy"),
+        v.literal("medium"),
+        v.literal("hard"),
+        v.literal("expert")
+      ),
+      notes: v.optional(v.string())
+    })),
+    
+    // PDF metadata
+    pdf_metadata: v.object({
+      total_pages: v.number(),
+      file_size_kb: v.optional(v.number()),
+      document_type: v.string(),
+      quality: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+      language: v.string(),
+      has_tables: v.boolean(),
+      has_charts: v.boolean()
+    }),
+    
+    validation_notes: v.optional(v.string()),
+    review_status: v.union(
+      v.literal("draft"),
+      v.literal("reviewed"),
+      v.literal("approved")
+    ),
+    
+    created_at: v.string(),
+    updated_at: v.string()
+  }).index("by_domain", ["domain"])
+    .index("by_review_status", ["review_status"])
+    .index("by_annotated_by", ["annotated_by"]),
+
+  // User corrections and learning
+  user_corrections: defineTable({
+    job_id: v.union(v.id("jobs"), v.id("comparisonJobs")),
+    document_id: v.id("documents"),
+    field_name: v.string(),
+    original_value: v.union(v.string(), v.number(), v.boolean(), v.null()),
+    original_unit: v.optional(v.string()),
+    original_confidence: v.number(),
+    corrected_value: v.union(v.string(), v.number(), v.boolean(), v.null()),
+    corrected_unit: v.optional(v.string()),
+    correction_type: v.union(
+      v.literal("value_fix"),
+      v.literal("unit_fix"),
+      v.literal("false_positive"),
+      v.literal("missed_extraction")
+    ),
+    user_id: v.string(),
+    workspace_id: v.id("workspaces"),
+    source_context: v.optional(v.string()),
+    correction_notes: v.optional(v.string()),
+    learning_applied: v.boolean(),
+    created_at: v.string()
+  }).index("by_job", ["job_id"])
+    .index("by_document", ["document_id"])
+    .index("by_user", ["user_id"])
+    .index("by_field", ["field_name"])
+    .index("by_correction_type", ["correction_type"]),
+
+  // KPI tracking and analytics
+  extraction_kpis: defineTable({
+    job_id: v.union(v.id("jobs"), v.id("comparisonJobs")),
+    domain: v.string(),
+    profile_version: v.string(),
+    synonym_map_version: v.string(),
+    
+    // Performance metrics
+    total_documents: v.number(),
+    total_pages: v.number(),
+    extraction_time_ms: v.number(),
+    ocr_time_ms: v.optional(v.number()),
+    llm_time_ms: v.optional(v.number()),
+    
+    // Quality metrics
+    total_fields_extracted: v.number(),
+    high_confidence_extractions: v.number(), // confidence >= 0.9
+    medium_confidence_extractions: v.number(), // 0.7 <= confidence < 0.9
+    low_confidence_extractions: v.number(), // confidence < 0.7
+    avg_confidence: v.number(),
+    
+    // Method breakdown
+    rule_based_extractions: v.number(),
+    llm_extractions: v.number(),
+    pattern_extractions: v.number(),
+    table_extractions: v.number(),
+    
+    // Cost metrics
+    estimated_cost_usd: v.optional(v.number()),
+    tokens_used: v.optional(v.number()),
+    
+    // Error tracking
+    extraction_errors: v.number(),
+    validation_failures: v.number(),
+    
+    created_at: v.string()
+  }).index("by_job", ["job_id"])
+    .index("by_domain", ["domain"])
+    .index("by_profile_version", ["profile_version"])
+    .index("by_created_at", ["created_at"]),
+
+  // Profile and synonym versioning
+  profile_versions: defineTable({
+    domain: v.string(),
+    version: v.string(),
+    profile_data: v.any(), // The actual domain profile
+    changelog: v.array(v.object({
+      change_type: v.string(), // "field_added", "synonym_updated", "rule_modified"
+      description: v.string(),
+      author: v.string()
+    })),
+    is_active: v.boolean(),
+    created_by: v.string(),
+    created_at: v.string(),
+    deprecated_at: v.optional(v.string())
+  }).index("by_domain", ["domain"])
+    .index("by_version", ["version"])
+    .index("by_is_active", ["is_active"]),
+
+  synonym_map_versions: defineTable({
+    version: v.string(),
+    synonym_data: v.any(), // The actual synonym mappings
+    domains_covered: v.array(v.string()),
+    total_synonyms: v.number(),
+    changelog: v.array(v.object({
+      change_type: v.string(),
+      field_affected: v.optional(v.string()),
+      description: v.string(),
+      author: v.string()
+    })),
+    is_active: v.boolean(),
+    created_by: v.string(),
+    created_at: v.string(),
+    deprecated_at: v.optional(v.string())
+  }).index("by_version", ["version"])
+    .index("by_is_active", ["is_active"]),
+
 });

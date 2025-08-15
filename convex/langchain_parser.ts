@@ -1,12 +1,16 @@
 /**
- * LangChain-based Semantic Parser
- * Implements the semantic parsing pipeline as described in back-end.md section 4.3
+ * LangChain-based Semantic Parser with Schema-First Prompts
+ * Implements PRD requirements for structured extraction with few-shot examples
+ * Uses domain profiles for targeted, schema-first extraction
  */
 
 import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { StructuredOutputParser } from "langchain/output_parsers";
 import { z } from "zod";
+import type { DomainProfile } from "./domain_profiles";
+import { applyExtractionRules } from "./extraction_rules";
+import { normalizeMetrics } from "./unit_converter";
 
 // Schema for extracted metrics
 const MetricCandidateSchema = z.object({
@@ -25,6 +29,118 @@ const MetricCandidatesArraySchema = z.array(MetricCandidateSchema);
 
 // Create structured output parser
 const outputParser = StructuredOutputParser.fromZodSchema(MetricCandidatesArraySchema);
+
+/**
+ * Generate schema-first prompt based on domain profile
+ * Implements PRD requirement for schema-first extraction
+ */
+function generateSchemaPrompt(domainProfile: DomainProfile): string {
+  const requiredFields = domainProfile.active_fields
+    .filter(field => field.required)
+    .map(field => `- ${field.display_label} (${field.field}): Priority ${field.priority}`)
+    .join('\n');
+    
+  const optionalFields = domainProfile.active_fields
+    .filter(field => !field.required)
+    .map(field => `- ${field.display_label} (${field.field}): Priority ${field.priority}`)
+    .join('\n');
+    
+  const prioritySections = domainProfile.priority_sections
+    .map((section, index) => `${index + 1}. ${section}`)
+    .join('\n');
+
+  return `
+DOMAIN: ${domainProfile.domain.toUpperCase()} (Version ${domainProfile.version})
+
+REQUIRED FIELDS (Extract these with high priority):
+${requiredFields}
+
+OPTIONAL FIELDS (Extract if found):
+${optionalFields}
+
+PRIORITY SECTIONS TO SEARCH (in order):
+${prioritySections}
+
+UNIT TARGETS:
+${Object.entries(domainProfile.unit_targets).map(([field, unit]) => `- ${field}: ${unit}`).join('\n')}
+
+FIELD SYNONYMS:
+${Object.entries(domainProfile.field_synonyms).map(([field, synonyms]) => 
+  `- ${field}: ${synonyms.slice(0, 5).join(', ')}${synonyms.length > 5 ? '...' : ''}`
+).join('\n')}
+`;
+}
+
+/**
+ * Generate few-shot examples based on domain
+ */
+function getFewShotExamples(domain: string): string {
+  switch (domain) {
+    case 'semiconductors':
+      return `
+EXAMPLE 1 - CHIP DATASHEET:
+Input: "The TPS546B25 operates at 3.3V ± 5% with maximum supply current of 15mA at 25°C ambient temperature. Package: HTSSOP-14"
+Output: [
+  {"label": "product_model", "value": "TPS546B25", "unit": null, "confidence": 0.95, "sourceContext": "The TPS546B25 operates..."},
+  {"label": "supply_voltage", "value": 3.3, "unit": "V", "confidence": 0.9, "sourceContext": "operates at 3.3V ± 5%"},
+  {"label": "power_max", "value": 15, "unit": "mA", "confidence": 0.88, "sourceContext": "maximum supply current of 15mA"},
+  {"label": "temperature_range", "value": "25", "unit": "°C", "confidence": 0.85, "sourceContext": "at 25°C ambient temperature"},
+  {"label": "form_factor", "value": "HTSSOP-14", "unit": null, "confidence": 0.92, "sourceContext": "Package: HTSSOP-14"}
+]
+
+EXAMPLE 2 - CHIP SPECIFICATIONS TABLE:
+Input: "Electrical Characteristics | Min | Typ | Max | Unit
+Supply Voltage (VDD) | 2.7 | 3.3 | 3.6 | V
+Operating Current | - | 12 | 18 | mA
+Clock Frequency | 1 | 16 | 32 | MHz"
+Output: [
+  {"label": "supply_voltage", "value": "2.7-3.6", "unit": "V", "confidence": 0.95, "sourceContext": "Supply Voltage (VDD) | 2.7 | 3.3 | 3.6 | V"},
+  {"label": "power_typical", "value": 12, "unit": "mA", "confidence": 0.92, "sourceContext": "Operating Current | - | 12 | 18 | mA"},
+  {"label": "frequency_max", "value": 32, "unit": "MHz", "confidence": 0.94, "sourceContext": "Clock Frequency | 1 | 16 | 32 | MHz"}
+]`;
+
+    case 'api_sdk':
+      return `
+EXAMPLE 1 - API DOCUMENTATION:
+Input: "Base URL: https://api.example.com/v2. Rate limit: 1000 requests per minute. Authentication via API key or OAuth 2.0. 99.9% uptime SLA."
+Output: [
+  {"label": "base_url", "value": "https://api.example.com/v2", "unit": null, "confidence": 0.98, "sourceContext": "Base URL: https://api.example.com/v2"},
+  {"label": "rate_limit", "value": 1000, "unit": "req/min", "confidence": 0.95, "sourceContext": "Rate limit: 1000 requests per minute"},
+  {"label": "auth_methods", "value": "API key, OAuth 2.0", "unit": null, "confidence": 0.9, "sourceContext": "Authentication via API key or OAuth 2.0"},
+  {"label": "sla_uptime", "value": 99.9, "unit": "percent", "confidence": 0.92, "sourceContext": "99.9% uptime SLA"}
+]
+
+EXAMPLE 2 - API PERFORMANCE TABLE:
+Input: "Endpoint | Avg Latency | P95 Latency | Max RPS
+/users | 45ms | 120ms | 500
+/orders | 78ms | 200ms | 200"
+Output: [
+  {"label": "latency_p95", "value": 120, "unit": "ms", "confidence": 0.9, "sourceContext": "/users | 45ms | 120ms | 500"},
+  {"label": "rate_limit", "value": 500, "unit": "req/s", "confidence": 0.88, "sourceContext": "Max RPS 500"}
+]`;
+
+    case 'software_b2b':
+      return `
+EXAMPLE 1 - SAAS PRICING:
+Input: "Professional Plan: $99/month for up to 100 users. SOC2 Type II certified. 99.95% uptime guarantee."
+Output: [
+  {"label": "price_list", "value": 99, "unit": "USD", "confidence": 0.95, "sourceContext": "$99/month"},
+  {"label": "quota_limits", "value": 100, "unit": "users", "confidence": 0.9, "sourceContext": "up to 100 users"},
+  {"label": "cert_soc2", "value": true, "unit": "boolean", "confidence": 0.92, "sourceContext": "SOC2 Type II certified"},
+  {"label": "sla_uptime", "value": 99.95, "unit": "percent", "confidence": 0.94, "sourceContext": "99.95% uptime guarantee"}
+]`;
+
+    default:
+      return `
+EXAMPLE - GENERAL:
+Input: "Performance: 1000 req/s throughput, 50ms average latency. Price: $49/month."
+Output: [
+  {"label": "throughput", "value": 1000, "unit": "req/s", "confidence": 0.9, "sourceContext": "1000 req/s throughput"},
+  {"label": "latency", "value": 50, "unit": "ms", "confidence": 0.88, "sourceContext": "50ms average latency"},
+  {"label": "price", "value": 49, "unit": "USD", "confidence": 0.92, "sourceContext": "$49/month"}
+]`;
+  }
+}
 
 // Enhanced LangChain prompt for aggressive B2B technical document extraction
 const SEMANTIC_PARSING_PROMPT = PromptTemplate.fromTemplate(`
@@ -107,48 +223,47 @@ function createDomainAwarePrompt(domainProfile: any): PromptTemplate {
     .map((field: any) => {
       const synonyms = domainProfile.field_synonyms[field.field] || [];
       const unitTarget = domainProfile.unit_targets[field.field];
-      return `- ${field.display_label}: Look for ${synonyms.join(', ')}${unitTarget ? ` (target unit: ${unitTarget})` : ''}`;
+      return `- ${field.display_label} (${field.field}): Look for ${synonyms.slice(0, 5).join(', ')}${unitTarget ? ` → ${unitTarget}` : ''}`;
     })
     .join('\n');
     
-  const sectionPriorities = domainProfile.priority_sections.slice(0, 8).join(', ');
+  const sectionPriorities = domainProfile.priority_sections.slice(0, 6).join(', ');
+  
+  // Get domain-specific few-shot examples
+  const examples = getFewShotExamples(domainProfile.domain);
   
   const domainSpecificPrompt = `
 You are an expert at extracting structured metrics from ${domainProfile.domain.toUpperCase()} B2B technical documents.
 
-DOMAIN-SPECIFIC EXTRACTION RULES FOR ${domainProfile.domain.toUpperCase()}:
+DOMAIN: ${domainProfile.domain.toUpperCase()} (Version ${domainProfile.version})
 
-TARGET FIELDS (in priority order):
+TARGET FIELDS (extract these with highest priority):
 ${priorityFields}
 
-PRIORITY SECTIONS TO SEARCH:
-Look especially in these document sections: ${sectionPriorities}
+PRIORITY DOCUMENT SECTIONS:
+Focus on: ${sectionPriorities}
 
-DOMAIN-SPECIFIC UNIT CONVERSIONS:
-${Object.entries(domainProfile.unit_targets).map(([field, target]) => 
-  `- ${field}: Convert all values to ${target}`
-).join('\n')}
+DOMAIN-SPECIFIC EXAMPLES:
+${examples}
 
-FIELD SYNONYMS TO RECOGNIZE:
-${Object.entries(domainProfile.field_synonyms).slice(0, 10).map(([field, synonyms]) => 
-  `- ${field}: ${(synonyms as string[]).join(', ')}`
-).join('\n')}
-
-Your task is to extract ALL possible metrics from the provided text that match the above domain profile. 
-Be COMPREHENSIVE - B2B buyers need complete technical specifications for procurement decisions.
-
-CRITICAL INSTRUCTIONS:
-1. Focus on the priority fields listed above
-2. Use the synonyms to identify metrics that might be labeled differently
-3. Pay special attention to the priority document sections
-4. Extract values with proper units according to target specifications
-5. For ranges (min/typ/max), extract the complete range information
-6. Mark confidence lower if unit conversion was required
+EXTRACTION GUIDELINES:
+1. **Field Priority**: Extract required fields first, then optional fields by priority
+2. **Synonym Recognition**: Use the synonyms above to identify fields with different labels
+3. **Unit Standardization**: Convert values to target units shown (e.g., mA, MHz, percent)
+4. **Range Handling**: For "min/typ/max" tables, extract according to domain rules:
+   ${Object.entries(domainProfile.range_rules || {}).map(([field, rule]) => 
+     `   - ${field}: use ${rule} value`
+   ).join('\n')}
+5. **Confidence Scoring**: 
+   - 0.9+ for exact matches with standard units
+   - 0.8+ for synonym matches or unit conversions
+   - 0.7+ for inferred values or unclear context
+6. **Comprehensive Extraction**: Extract ALL measurable metrics - B2B buyers need complete specs
 
 Text to analyze:
 {text}
 
-CRITICAL: Return valid JSON only. Do NOT wrap in markdown backticks.
+IMPORTANT: Return valid JSON array only. Do NOT wrap in markdown backticks or explanatory text.
 
 {format_instructions}
 `;
@@ -194,13 +309,17 @@ export async function parseMetricsWithLangChain(
     console.log("DEBUG: Using", domainProfile ? 'domain-aware' : 'generic', "extraction prompt for domain:", domainProfile?.domain);
 
     // Run LangChain extraction with format instructions
+    const promptContent = await finalPrompt.format({
+      text: combinedText,
+      format_instructions: outputParser.getFormatInstructions()
+    });
+    
+    console.log("DEBUG: Full prompt being sent to LLM:", promptContent.substring(0, 1000), "...");
+    
     const rawResponse = await llm.invoke([
       {
         type: "human" as const,
-        content: await finalPrompt.format({
-          text: combinedText,
-          format_instructions: outputParser.getFormatInstructions()
-        })
+        content: promptContent
       }
     ]);
 
@@ -221,11 +340,15 @@ export async function parseMetricsWithLangChain(
     // Parse manually for robustness with complex B2B specsheets
     const parsedResponse = JSON.parse(cleanedResponse);
     
-    // Validate against schema
+    // Validate against schema and apply domain-specific confidence adjustments
     const validatedResponse = MetricCandidatesArraySchema.parse(parsedResponse);
     
-    console.log("DEBUG: Validated metrics count:", validatedResponse.length);
-    return validatedResponse;
+    // Apply domain-specific post-processing
+    const processedResponse = applyDomainPostProcessing(validatedResponse, domainProfile);
+    
+    console.log("DEBUG: Validated metrics count:", processedResponse.length);
+    console.log("DEBUG: Sample extracted metrics:", processedResponse.slice(0, 3).map(m => `${m.label}: ${m.value} ${m.unit || ''}`));
+    return processedResponse;
     
   } catch (error) {
     console.error("LangChain semantic parsing failed:", error);
@@ -248,28 +371,64 @@ export async function extractMetricCandidates(
 ): Promise<MetricCandidate[]> {
   const candidates: MetricCandidate[] = [];
 
-  // Try LangChain first for semantic understanding with domain awareness
+  console.log("DEBUG: Starting metric extraction with:", {
+    hasOpenAI: !!openaiApiKey,
+    hasDomainProfile: !!domainProfile,
+    domain: domainProfile?.domain,
+    textBlockCount: textBlocks.length,
+    tableCount: tables.length
+  });
+
+  // Apply regex/heuristic rules for easy fields before LLM processing
+  if (domainProfile) {
+    // Use dedicated extraction rules for high-confidence patterns
+    const ruleResults = applyExtractionRules(textBlocks, domainProfile);
+    candidates.push(...ruleResults);
+    console.log("DEBUG: Rule-based extraction found", ruleResults.length, "candidates");
+    
+    // Additional heuristic patterns as backup
+    const heuristicResults = extractWithDomainHeuristics(textBlocks, domainProfile);
+    
+    // Merge heuristics, avoiding duplicates with rule-based results
+    const seenRuleLabels = new Set(ruleResults.map(r => r.label));
+    const newHeuristics = heuristicResults.filter(h => !seenRuleLabels.has(h.label));
+    candidates.push(...newHeuristics);
+    console.log("DEBUG: Heuristic extraction added", newHeuristics.length, "additional candidates");
+  }
+
+  // Try LangChain for semantic understanding with domain awareness
   if (openaiApiKey) {
     const langchainResults = await parseMetricsWithLangChain(textBlocks, openaiApiKey, domainProfile);
     candidates.push(...langchainResults);
+    console.log("DEBUG: LangChain extraction found", langchainResults.length, "candidates");
   }
 
   // Fallback to pattern matching for additional coverage
   const patternResults = extractWithPatterns(textBlocks);
   
-  // Merge results, preferring LangChain for duplicates
+  // Merge results, preferring LangChain/heuristics for duplicates
   const seenLabels = new Set(candidates.map(c => c.label.toLowerCase()));
   for (const pattern of patternResults) {
     if (!seenLabels.has(pattern.label.toLowerCase())) {
       candidates.push(pattern);
     }
   }
+  console.log("DEBUG: Pattern extraction added", patternResults.filter(p => !seenLabels.has(p.label.toLowerCase())).length, "new candidates");
 
   // Extract from tables using structured approach
   const tableResults = extractFromTables(tables);
   candidates.push(...tableResults);
+  console.log("DEBUG: Table extraction found", tableResults.length, "candidates");
 
-  return candidates;
+  console.log("DEBUG: Total extracted candidates before normalization:", candidates.length);
+  
+  // Apply deterministic unit conversion and composite confidence scoring
+  const normalizedCandidates = normalizeMetrics(candidates, domainProfile);
+  
+  console.log("DEBUG: After normalization - candidates:", normalizedCandidates.length);
+  console.log("DEBUG: Top 3 confidence scores:", normalizedCandidates.slice(0, 3).map(c => `${c.label}:${c.confidence.toFixed(3)}`));
+  
+  return normalizedCandidates;
 }
 
 /**
@@ -472,6 +631,169 @@ function extractFromTables(tables: Array<any>): MetricCandidate[] {
   
   return candidates;
 }
+
+/**
+ * Domain-specific heuristic extraction for easy fields before LLM processing
+ * Implements regex/rules for high-confidence extraction patterns
+ */
+function extractWithDomainHeuristics(
+  textBlocks: Array<{ text: string; page?: number }>,
+  domainProfile: any
+): MetricCandidate[] {
+  const candidates: MetricCandidate[] = [];
+  const domain = domainProfile.domain;
+  
+  console.log("DEBUG: Running domain heuristics for", domain);
+  
+  for (const block of textBlocks) {
+    const text = block.text;
+    
+    // Semiconductor-specific heuristics
+    if (domain === 'semiconductors') {
+      // Supply voltage patterns: "VDD = 3.3V", "Supply: 1.8V to 5.5V"
+      const voltageMatch = text.match(/(VDD|VCC|Supply[\s\w]*[Vv]oltage)[\s:=]+(\d+(?:\.\d+)?(?:\s*to\s*\d+(?:\.\d+)?)?)\s*V/gi);
+      if (voltageMatch) {
+        voltageMatch.forEach(match => {
+          const valueMatch = match.match(/(\d+(?:\.\d+)?(?:\s*to\s*\d+(?:\.\d+)?)?)\s*V/i);
+          if (valueMatch) {
+            candidates.push({
+              label: "supply_voltage",
+              value: valueMatch[1],
+              unit: "V",
+              confidence: 0.95,
+              sourceContext: match,
+              pageRef: block.page
+            });
+          }
+        });
+      }
+      
+      // Operating temperature: "-40°C to +125°C", "Temp: -40 to 85°C"
+      const tempMatch = text.match(/(Operating|Ambient|Junction)?[\s\w]*[Tt]emperature[\s:]*(-?\d+(?:\.\d+)?\s*°?C?\s*to\s*[+-]?\d+(?:\.\d+)?\s*°C)/gi);
+      if (tempMatch) {
+        tempMatch.forEach(match => {
+          const rangeMatch = match.match(/(-?\d+(?:\.\d+)?\s*°?C?\s*to\s*[+-]?\d+(?:\.\d+)?\s*°C)/i);
+          if (rangeMatch) {
+            candidates.push({
+              label: "temperature_range",
+              value: rangeMatch[1],
+              unit: "°C",
+              confidence: 0.93,
+              sourceContext: match,
+              pageRef: block.page
+            });
+          }
+        });
+      }
+      
+      // Package/Form factor: "Package: TSSOP-14", "QFN-32"
+      const packageMatch = text.match(/(Package|Form[\s\w]*Factor)[\s:]+([A-Z]{2,6}-?\d+)/gi);
+      if (packageMatch) {
+        packageMatch.forEach(match => {
+          const pkgMatch = match.match(/([A-Z]{2,6}-?\d+)/i);
+          if (pkgMatch) {
+            candidates.push({
+              label: "form_factor",
+              value: pkgMatch[1],
+              confidence: 0.9,
+              sourceContext: match,
+              pageRef: block.page
+            });
+          }
+        });
+      }
+    }
+    
+    // API/SDK specific heuristics
+    if (domain === 'api_sdk') {
+      // Rate limits: "1000 requests/minute", "Rate limit: 5000/hour"
+      const rateLimitMatch = text.match(/(Rate[\s\w]*[Ll]imit|API[\s\w]*[Ll]imit)[\s:]*([\d,]+)\s*(?:requests?|calls?)?\s*[\/\s]*(minute|hour|second|min|hr|sec|s)/gi);
+      if (rateLimitMatch) {
+        rateLimitMatch.forEach(match => {
+          const valueMatch = match.match(/([\d,]+)\s*(?:requests?|calls?)?\s*[\/\s]*(minute|hour|second|min|hr|sec|s)/i);
+          if (valueMatch) {
+            const value = parseFloat(valueMatch[1].replace(/,/g, ''));
+            const unit = valueMatch[2].toLowerCase().startsWith('m') ? 'req/min' : 
+                        valueMatch[2].toLowerCase().startsWith('h') ? 'req/hr' : 'req/s';
+            candidates.push({
+              label: "rate_limit",
+              value,
+              unit,
+              confidence: 0.92,
+              sourceContext: match,
+              pageRef: block.page
+            });
+          }
+        });
+      }
+      
+      // Base URL: "https://api.example.com/v1"
+      const urlMatch = text.match(/(Base[\s\w]*URL|API[\s\w]*[Ee]ndpoint)[\s:]*([a-zA-Z][a-zA-Z\d+.-]*:\/\/[^\s]+)/gi);
+      if (urlMatch) {
+        urlMatch.forEach(match => {
+          const urlPart = match.match(/([a-zA-Z][a-zA-Z\d+.-]*:\/\/[^\s]+)/i);
+          if (urlPart) {
+            candidates.push({
+              label: "base_url",
+              value: urlPart[1],
+              confidence: 0.95,
+              sourceContext: match,
+              pageRef: block.page
+            });
+          }
+        });
+      }
+    }
+    
+    // Software B2B specific heuristics  
+    if (domain === 'software_b2b') {
+      // Uptime SLA: "99.9% uptime", "SLA: 99.95%"
+      const uptimeMatch = text.match(/(Uptime|SLA|Availability)[\s:]*([\d.]+)%/gi);
+      if (uptimeMatch) {
+        uptimeMatch.forEach(match => {
+          const percentMatch = match.match(/([\d.]+)%/i);
+          if (percentMatch) {
+            const value = parseFloat(percentMatch[1]);
+            if (value >= 90) { // Sanity check for uptime
+              candidates.push({
+                label: "sla_uptime",
+                value,
+                unit: "percent",
+                confidence: 0.9,
+                sourceContext: match,
+                pageRef: block.page
+              });
+            }
+          }
+        });
+      }
+      
+      // Pricing: "$99/month", "Starting at $49 per user"
+      const priceMatch = text.match(/(Price|Cost|Starting[\s\w]*at)[\s:]*\$([\d,.]+)\s*(?:\/|per)?\s*(month|user|year|annual)?/gi);
+      if (priceMatch) {
+        priceMatch.forEach(match => {
+          const valueMatch = match.match(/\$([\d,.]+)/i);
+          if (valueMatch) {
+            const value = parseFloat(valueMatch[1].replace(/,/g, ''));
+            candidates.push({
+              label: "price_list",
+              value,
+              unit: "USD",
+              confidence: 0.88,
+              sourceContext: match,
+              pageRef: block.page
+            });
+          }
+        });
+      }
+    }
+  }
+  
+  console.log(`DEBUG: Domain heuristics for ${domain} found ${candidates.length} candidates`);
+  return candidates;
+}
+
+// Legacy post-processing functions removed - now handled by unit_converter.ts
 
 /**
  * Parse a raw value string into typed value + unit
