@@ -1,27 +1,5 @@
 {
   "buildCommand": "npm run build",
-  "framework": null,
-  "functions": {
-    "build/server/nodejs_*/index.js": {
-      "runtime": "nodejs20.x"
-    }
-  },
-  "routes": [
-    {
-      "src": "/build/client/(.*)",
-      "headers": {
-        "cache-control": "public, max-age=31536000, immutable"
-      },
-      "continue": true
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/.*",
-      "dest": "/build/server/nodejs_eyJydW50aW1lIjoibm9kZWpzIn0/index.js"
-    }
-  ],
   "env": {
     "NODE_ENV": "production"
   }
