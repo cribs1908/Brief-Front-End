@@ -74,15 +74,14 @@ http.route({
 
 // Upload document to job
 http.route({
-  path: "/api/jobs/:jobId/documents",
+  path: "/api/upload-document",
   method: "POST", 
   handler: httpAction(async (ctx, req) => {
     try {
-      const jobIdParam = req.url.split('/')[4]; // Extract from path
       const body = await req.json();
-      const { filename, storageId } = body;
+      const { jobId, filename, storageId } = body;
 
-      if (!jobIdParam || !filename || !storageId) {
+      if (!jobId || !filename || !storageId) {
         return new Response(JSON.stringify({ 
           error: "jobId, filename, and storageId are required" 
         }), {
@@ -92,7 +91,7 @@ http.route({
       }
 
       const documentId = await ctx.runAction(api.jobs.uploadDocument, {
-        jobId: jobIdParam as Id<"jobs">,
+        jobId: jobId as Id<"jobs">,
         filename,
         storageId: storageId as Id<"_storage">,
       });
@@ -115,13 +114,14 @@ http.route({
 
 // Process job (start the pipeline)
 http.route({
-  path: "/api/jobs/:jobId/process",
+  path: "/api/process-job",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
     try {
-      const jobIdParam = req.url.split('/')[4]; // Extract from path
+      const body = await req.json();
+      const { jobId } = body;
       
-      if (!jobIdParam) {
+      if (!jobId) {
         return new Response(JSON.stringify({ error: "jobId is required" }), {
           status: 400,
           headers: createCorsHeaders(),
@@ -130,12 +130,12 @@ http.route({
 
       // Start processing in background
       void ctx.runAction(api.jobs.processJob, {
-        jobId: jobIdParam as Id<"jobs">,
+        jobId: jobId as Id<"jobs">,
       });
 
       return new Response(JSON.stringify({ 
         message: "Job processing started",
-        jobId: jobIdParam,
+        jobId: jobId,
       }), {
         status: 200,
         headers: createCorsHeaders(),
@@ -151,13 +151,14 @@ http.route({
 
 // Get job status and details
 http.route({
-  path: "/api/jobs/:jobId",
+  path: "/api/job-status",
   method: "GET",
   handler: httpAction(async (ctx, req) => {
     try {
-      const jobIdParam = req.url.split('/')[4]; // Extract from path
+      const url = new URL(req.url);
+      const jobId = url.searchParams.get("jobId");
       
-      if (!jobIdParam) {
+      if (!jobId) {
         return new Response(JSON.stringify({ error: "jobId is required" }), {
           status: 400,
           headers: createCorsHeaders(),
@@ -165,7 +166,7 @@ http.route({
       }
 
       const jobDetails = await ctx.runQuery(api.jobs.getJobWithDocuments, {
-        jobId: jobIdParam as Id<"jobs">,
+        jobId: jobId as Id<"jobs">,
       });
 
       if (!jobDetails) {
@@ -190,13 +191,14 @@ http.route({
 
 // Get job results (comparison table)
 http.route({
-  path: "/api/jobs/:jobId/results",
+  path: "/api/job-results",
   method: "GET",
   handler: httpAction(async (ctx, req) => {
     try {
-      const jobIdParam = req.url.split('/')[4]; // Extract from path
+      const url = new URL(req.url);
+      const jobId = url.searchParams.get("jobId");
       
-      if (!jobIdParam) {
+      if (!jobId) {
         return new Response(JSON.stringify({ error: "jobId is required" }), {
           status: 400,
           headers: createCorsHeaders(),
@@ -204,7 +206,7 @@ http.route({
       }
 
       const results = await ctx.runQuery(api.jobs.getJobResults, {
-        jobId: jobIdParam as Id<"jobs">,
+        jobId: jobId as Id<"jobs">,
       });
 
       return new Response(JSON.stringify(results), {
@@ -226,7 +228,7 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, req) => {
     try {
-      const jobIdParam = req.url.split('/')[4]; // Extract from path
+      const jobIdParam = req.url.split('/')[3]; // Extract from path
       const body = await req.json();
       const { format } = body;
 

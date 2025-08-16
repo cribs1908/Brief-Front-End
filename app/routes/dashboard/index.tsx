@@ -2,7 +2,8 @@
 import { useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
-import { useComparison } from "~/state/comparison";
+import { useComparison } from "~/state/comparison-supabase";
+import { SupabaseSetup } from "~/components/setup/supabase-setup";
 import { Link, useNavigate } from "react-router";
 
 export default function Page() {
@@ -19,11 +20,15 @@ export default function Page() {
   }, [addFiles, navigate]);
 
   const recent = state.archive.slice(0, 5);
+  const isSupabaseConfigured = import.meta.env.VITE_SUPABASE_URL && 
+                               import.meta.env.VITE_SUPABASE_ANON_KEY &&
+                               !import.meta.env.VITE_SUPABASE_URL.includes('your_supabase');
 
   return (
     <div className="flex flex-1 flex-col">
       <div className="@container/main flex flex-1 flex-col gap-4 py-4 md:gap-6 md:py-6">
         <div className="px-4 lg:px-6 flex flex-col gap-4">
+          {!isSupabaseConfigured && <SupabaseSetup />}
           <Card data-slot="card">
             <CardHeader>
               <CardTitle className="text-base">Dashboard</CardTitle>
@@ -91,7 +96,7 @@ export default function Page() {
                 <CardDescription>Stato (placeholder)</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-sm text-muted-foreground">Voci mappate: {Object.keys(state.synonyms).length}</div>
+                <div className="text-sm text-muted-foreground">Sistema Supabase attivo</div>
               </CardContent>
             </Card>
           </div>

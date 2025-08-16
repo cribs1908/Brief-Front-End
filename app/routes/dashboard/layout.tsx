@@ -9,7 +9,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Route } from "./+types/layout";
 import { createClerkClient } from "@clerk/react-router/api.server";
 import { Outlet } from "react-router";
-import { ComparisonProvider } from "~/state/comparison";
+import { ComparisonProvider } from "~/state/comparison-supabase";
 
 export async function loader(args: Route.LoaderArgs) {
   const { userId } = await getAuth(args);

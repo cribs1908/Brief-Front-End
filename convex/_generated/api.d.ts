@@ -13,6 +13,7 @@ import type * as domain_profiles from "../domain_profiles.js";
 import type * as domain_schema from "../domain_schema.js";
 import type * as extraction_rules from "../extraction_rules.js";
 import type * as gold_set_validation from "../gold_set_validation.js";
+import type * as google_vision_ocr from "../google_vision_ocr.js";
 import type * as http from "../http.js";
 import type * as http_full from "../http_full.js";
 import type * as jobs from "../jobs.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   domain_schema: typeof domain_schema;
   extraction_rules: typeof extraction_rules;
   gold_set_validation: typeof gold_set_validation;
+  google_vision_ocr: typeof google_vision_ocr;
   http: typeof http;
   http_full: typeof http_full;
   jobs: typeof jobs;

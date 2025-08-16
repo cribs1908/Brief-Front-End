@@ -157,6 +157,26 @@ export const getDocumentArtifacts = query({
   },
 });
 
+export const getRawExtractionsByDocument = query({
+  args: { documentId: v.id("documents") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("extractionsRaw")
+      .withIndex("by_document", (q) => q.eq("documentId", args.documentId))
+      .collect();
+  },
+});
+
+export const getNormalizedExtractionsByDocument = query({
+  args: { documentId: v.id("documents") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("extractionsNorm")
+      .withIndex("by_document", (q) => q.eq("documentId", args.documentId))
+      .collect();
+  },
+});
+
 // === DOCUMENT UPLOAD & MANAGEMENT ===
 
 export const uploadDocument = action({
@@ -165,7 +185,7 @@ export const uploadDocument = action({
     filename: v.string(),
     storageId: v.id("_storage"),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Id<"documents">> => {
     // Get PDF URL and calculate hash
     const pdfUrl = await ctx.storage.getUrl(args.storageId);
     if (!pdfUrl) {
@@ -176,7 +196,7 @@ export const uploadDocument = action({
     const hash = `${args.filename}-${Date.now()}`;
 
     // Create document record
-    const documentId = await ctx.runMutation(api.jobs.insertDocument, {
+    const documentId: Id<"documents"> = await ctx.runMutation(api.jobs.insertDocument, {
       jobId: args.jobId,
       filename: args.filename,
       hash,
@@ -246,13 +266,117 @@ export const updateJobStatus = mutation({
   },
 });
 
+export const updateJobDomain = mutation({
+  args: {
+    jobId: v.id("jobs"),
+    domain: v.string(),
+    profileVersion: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.jobId, {
+      domain: args.domain,
+      profileVersion: args.profileVersion,
+    });
+  },
+});
+
+export const insertArtifact = mutation({
+  args: {
+    documentId: v.id("documents"),
+    page: v.number(),
+    type: v.string(),
+    payload: v.any(),
+    bboxMap: v.optional(v.any()),
+    createdAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("artifacts", args);
+  },
+});
+
+export const updateDocument = mutation({
+  args: {
+    documentId: v.id("documents"),
+    updates: v.object({
+      pages: v.optional(v.number()),
+      qualityScore: v.optional(v.number()),
+      processingStatus: v.optional(v.string()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.documentId, args.updates);
+  },
+});
+
+export const insertRawExtraction = mutation({
+  args: {
+    documentId: v.id("documents"),
+    fieldId: v.string(),
+    fieldLabel: v.string(),
+    valueRaw: v.string(),
+    unitRaw: v.optional(v.string()),
+    source: v.object({
+      page: v.number(),
+      bbox: v.optional(v.any()),
+      method: v.string(),
+    }),
+    confidence: v.number(),
+    candidates: v.array(v.any()),
+    createdAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("extractionsRaw", args);
+  },
+});
+
+export const insertNormalizedExtraction = mutation({
+  args: {
+    documentId: v.id("documents"),
+    fieldId: v.string(),
+    value: v.any(),
+    unit: v.optional(v.string()),
+    note: v.optional(v.string()),
+    flags: v.array(v.string()),
+    provenanceRef: v.string(),
+    confidence: v.number(),
+    createdAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("extractionsNorm", args);
+  },
+});
+
+export const insertResults = mutation({
+  args: {
+    jobId: v.id("jobs"),
+    columns: v.array(v.any()),
+    rows: v.array(v.any()),
+    highlights: v.array(v.any()),
+    exports: v.any(),
+    createdAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("results", args);
+  },
+});
+
+export const updateResults = mutation({
+  args: {
+    resultId: v.id("results"),
+    exports: v.any(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.resultId, { exports: args.exports });
+  },
+});
+
 export const insertDomainClassification = mutation({
   args: {
     documentId: v.id("documents"),
     domain: v.string(),
     confidence: v.number(),
     method: v.string(),
-    alternativeDomains: v.array(v.string()),
+    alternativeDomains: v.array(v.object({ domain: v.string(), confidence: v.number() })),
     requiresConfirmation: v.boolean(),
     evidence: v.object({
       primaryMatches: v.array(v.string()),
@@ -282,7 +406,7 @@ export const cancelJob = mutation({
 export const processJob = action({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
-    const job = await ctx.runQuery(api.jobs.getJob, { jobId: args.jobId });
+    let job = await ctx.runQuery(api.jobs.getJob, { jobId: args.jobId });
     if (!job) throw new Error("Job not found");
 
     const startTime = Date.now();
@@ -291,26 +415,31 @@ export const processJob = action({
       // STEP 1: Classification
       if (job.status === "UPLOADED") {
         await ctx.runAction(api.jobs.classifyJobDocuments, { jobId: args.jobId });
+        job = await ctx.runQuery(api.jobs.getJob, { jobId: args.jobId });
       }
 
       // STEP 2: Parsing  
       if (job.status === "CLASSIFIED") {
         await ctx.runAction(api.jobs.parseJobDocuments, { jobId: args.jobId });
+        job = await ctx.runQuery(api.jobs.getJob, { jobId: args.jobId });
       }
 
       // STEP 3: Extraction
       if (job.status === "PARSED") {
         await ctx.runAction(api.jobs.extractJobDocuments, { jobId: args.jobId });
+        job = await ctx.runQuery(api.jobs.getJob, { jobId: args.jobId });
       }
 
       // STEP 4: Normalization
       if (job.status === "EXTRACTED") {
         await ctx.runAction(api.jobs.normalizeJobDocuments, { jobId: args.jobId });
+        job = await ctx.runQuery(api.jobs.getJob, { jobId: args.jobId });
       }
 
       // STEP 5: Build Results
       if (job.status === "NORMALIZED") {
         await ctx.runAction(api.jobs.buildJobResults, { jobId: args.jobId });
+        job = await ctx.runQuery(api.jobs.getJob, { jobId: args.jobId });
       }
 
       // Calculate final metrics
@@ -358,22 +487,41 @@ export const classifyJobDocuments = action({
       });
 
       if (artifacts.length === 0) {
-        // If no artifacts, try to extract basic text first
-        console.log("No text artifacts found for document, creating minimal classification");
+        // If no artifacts, classify based on filename first
+        console.log("No text artifacts found, classifying based on filename");
         
-        // Create a basic classification based on filename
         const filenameClassification = classifyFromFilename(document.filename);
-        if (filenameClassification && filenameClassification.confidence! > highestConfidence) {
+        
+        // Store basic classification
+        await ctx.runMutation(api.jobs.insertDomainClassification, {
+          documentId: document._id,
+          domain: filenameClassification.domain,
+          confidence: filenameClassification.confidence,
+          method: "filename_only",
+          alternativeDomains: filenameClassification.alternative_domains || [],
+          requiresConfirmation: filenameClassification.requires_user_confirmation,
+          evidence: {
+            primaryMatches: filenameClassification.evidence?.primaryMatches || [],
+            secondaryMatches: filenameClassification.evidence?.secondaryMatches || [],
+            sectionMatches: filenameClassification.evidence?.sectionMatches || [],
+            negativeMatches: filenameClassification.evidence?.negativeMatches || [],
+          },
+          createdAt: now(),
+        });
+        
+        // Update highest confidence domain
+        if (filenameClassification.confidence > highestConfidence) {
           finalDomain = filenameClassification.domain;
-          highestConfidence = filenameClassification.confidence!;
+          highestConfidence = filenameClassification.confidence;
         }
+        
         continue;
       }
 
       // Extract text blocks from artifacts
       const textBlocks = artifacts
-        .flatMap(artifact => artifact.payload?.textBlocks || [])
-        .map(block => ({ text: block.text || "", page: block.page || 1 }));
+        .flatMap((artifact: any) => artifact.payload?.textBlocks || [])
+        .map((block: any) => ({ text: block.text || "", page: block.page || 1 }));
 
       // Classify domain
       const contentClassification = classifyDomain(textBlocks, []);
@@ -415,7 +563,8 @@ export const classifyJobDocuments = action({
       });
 
       // Also update the domain and profile version
-      await ctx.db.patch(args.jobId, {
+      await ctx.runMutation(api.jobs.updateJobDomain, {
+        jobId: args.jobId,
         domain: finalDomain,
         profileVersion: profile.version,
       });
@@ -429,10 +578,7 @@ export const classifyJobDocuments = action({
 export const parseJobDocuments = action({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
-    const documents = await ctx.db
-      .query("documents")
-      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
-      .collect();
+    const documents = await ctx.runQuery(api.jobs.getJobDocuments, { jobId: args.jobId });
 
     let totalPages = 0;
     let ocrPages = 0;
@@ -443,52 +589,18 @@ export const parseJobDocuments = action({
         continue;
       }
 
-      // Process via OCR Worker
-      const processed = await processPdfViaOcrWorker(ctx, document.storageId);
+      // Process via Google Cloud Vision OCR
+      const processed = await ctx.runAction(api.google_vision_ocr.extractTextFromPDF, {
+        storageId: document.storageId,
+        filename: document.filename,
+      });
       totalPages += processed.pages || 0;
       ocrPages += processed.ocrUsed ? (processed.pages || 0) : 0;
 
-      // Store artifacts
-      if (processed.textBlocks && processed.textBlocks.length > 0) {
-        // Store text artifacts by page
-        const textByPage = new Map<number, any[]>();
-        for (const block of processed.textBlocks) {
-          const page = block.page || 1;
-          if (!textByPage.has(page)) textByPage.set(page, []);
-          textByPage.get(page)!.push(block);
-        }
-
-        for (const [page, blocks] of textByPage) {
-          await ctx.db.insert("artifacts", {
-            documentId: document._id,
-            page,
-            type: "text",
-            payload: { textBlocks: blocks },
-            bboxMap: undefined,
-            createdAt: now(),
-          });
-        }
-      }
-
-      // Store table artifacts
-      if (processed.tables && processed.tables.length > 0) {
-        for (let i = 0; i < processed.tables.length; i++) {
-          const table = processed.tables[i];
-          await ctx.db.insert("artifacts", {
-            documentId: document._id,
-            page: table.page || 1,
-            type: "table",
-            payload: { table },
-            bboxMap: table.bboxMap,
-            createdAt: now(),
-          });
-        }
-      }
-
-      // Update document with page count and quality score
-      await ctx.db.patch(document._id, {
-        pages: processed.pages,
-        qualityScore: Math.min(1.0, (processed.textBlocks?.length || 0) / 10),
+      // Process and store OCR results
+      await ctx.runAction(api.google_vision_ocr.processOCRResults, {
+        ocrResults: processed,
+        documentId: document._id,
       });
     }
 
@@ -573,28 +685,23 @@ export const extractJobDocuments = action({
       throw new Error("Job domain not classified yet");
     }
 
-    const documents = await ctx.db
-      .query("documents")
-      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
-      .collect();
+    const documents = await ctx.runQuery(api.jobs.getJobDocuments, { jobId: args.jobId });
 
     const domainProfile = getDomainProfile(job.domain as any);
     const openaiApiKey = process.env.OPENAI_API_KEY;
 
     for (const document of documents) {
       // Get text artifacts for this document
-      const textArtifacts = await ctx.db
-        .query("artifacts")
-        .withIndex("by_document", (q) => q.eq("documentId", document._id))
-        .filter((q) => q.eq(q.field("type"), "text"))
-        .collect();
+      const textArtifacts = await ctx.runQuery(api.jobs.getDocumentArtifacts, { 
+        documentId: document._id,
+        type: "text"
+      });
 
       // Get table artifacts for this document
-      const tableArtifacts = await ctx.db
-        .query("artifacts")
-        .withIndex("by_document", (q) => q.eq("documentId", document._id))
-        .filter((q) => q.eq(q.field("type"), "table"))
-        .collect();
+      const tableArtifacts = await ctx.runQuery(api.jobs.getDocumentArtifacts, { 
+        documentId: document._id,
+        type: "table"
+      });
 
       if (textArtifacts.length === 0) {
         console.log("No text artifacts found for document", document._id);
@@ -602,14 +709,14 @@ export const extractJobDocuments = action({
       }
 
       // Convert artifacts to format expected by LangChain parser
-      const textBlocks = textArtifacts.flatMap(artifact => 
+      const textBlocks = textArtifacts.flatMap((artifact: any) => 
         (artifact.payload?.textBlocks || []).map((block: any) => ({
           text: block.text || "",
           page: artifact.page,
         }))
       );
 
-      const tables = tableArtifacts.map(artifact => artifact.payload?.table || {});
+      const tables = tableArtifacts.map((artifact: any) => artifact.payload?.table || {});
 
       // Extract metrics using LangChain + domain profile
       const { extractMetricCandidates } = await import("./langchain_parser");
@@ -624,7 +731,7 @@ export const extractJobDocuments = action({
 
       // Store raw extractions
       for (const candidate of candidates) {
-        await ctx.db.insert("extractionsRaw", {
+        await ctx.runMutation(api.jobs.insertRawExtraction, {
           documentId: document._id,
           fieldId: candidate.label.toLowerCase().replace(/\s+/g, '_'),
           fieldLabel: candidate.label,
@@ -636,7 +743,7 @@ export const extractJobDocuments = action({
             method: "langchain",
           },
           confidence: candidate.confidence,
-          candidates: undefined,
+          candidates: [],
           createdAt: now(),
         });
       }
@@ -658,19 +765,15 @@ export const normalizeJobDocuments = action({
       throw new Error("Job domain not classified yet");
     }
 
-    const documents = await ctx.db
-      .query("documents")
-      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
-      .collect();
+    const documents = await ctx.runQuery(api.jobs.getJobDocuments, { jobId: args.jobId });
 
     const domainProfile = getDomainProfile(job.domain as any);
 
     for (const document of documents) {
       // Get raw extractions for this document
-      const rawExtractions = await ctx.db
-        .query("extractionsRaw")
-        .withIndex("by_document", (q) => q.eq("documentId", document._id))
-        .collect();
+      const rawExtractions = await ctx.runQuery(api.jobs.getRawExtractionsByDocument, { 
+        documentId: document._id 
+      });
 
       console.log(`Normalizing ${rawExtractions.length} raw extractions for document ${document._id}`);
 
@@ -705,7 +808,7 @@ export const normalizeJobDocuments = action({
         }
 
         // Store normalized extraction
-        await ctx.db.insert("extractionsNorm", {
+        await ctx.runMutation(api.jobs.insertNormalizedExtraction, {
           documentId: document._id,
           fieldId: extraction.fieldId,
           value: normalized.value,
@@ -735,10 +838,7 @@ export const buildJobResults = action({
       throw new Error("Job domain not classified yet");
     }
 
-    const documents = await ctx.db
-      .query("documents")
-      .withIndex("by_job", (q) => q.eq("jobId", args.jobId))
-      .collect();
+    const documents = await ctx.runQuery(api.jobs.getJobDocuments, { jobId: args.jobId });
 
     const domainProfile = getDomainProfile(job.domain as any);
 
@@ -746,10 +846,9 @@ export const buildJobResults = action({
     const allExtractions = new Map<string, Map<string, any>>(); // fieldId -> documentId -> extraction
     
     for (const document of documents) {
-      const extractions = await ctx.db
-        .query("extractionsNorm")
-        .withIndex("by_document", (q) => q.eq("documentId", document._id))
-        .collect();
+      const extractions = await ctx.runQuery(api.jobs.getNormalizedExtractionsByDocument, { 
+        documentId: document._id 
+      });
 
       for (const extraction of extractions) {
         if (!allExtractions.has(extraction.fieldId)) {
@@ -772,7 +871,7 @@ export const buildJobResults = action({
       }));
 
     // Build rows (one per document)
-    const rows = documents.map(document => {
+    const rows = documents.map((document: any) => {
       const cells: Record<string, any> = {};
       
       for (const column of columns) {
@@ -807,7 +906,7 @@ export const buildJobResults = action({
     const highlights = calculateHighlights(columns, rows);
 
     // Store results
-    await ctx.db.insert("results", {
+    await ctx.runMutation(api.jobs.insertResults, {
       jobId: args.jobId,
       columns,
       rows,
@@ -937,7 +1036,7 @@ export const updateResultsExports = mutation({
     
     // Update exports object
     const exports = results.exports || {};
-    exports[args.format as keyof typeof exports] = {
+    (exports as any)[args.format] = {
       storageId: args.storageId,
       filename: args.filename,
       createdAt: now(),

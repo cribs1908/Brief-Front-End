@@ -793,7 +793,52 @@ function extractWithDomainHeuristics(
   return candidates;
 }
 
-// Legacy post-processing functions removed - now handled by unit_converter.ts
+/**
+ * Apply domain-specific post-processing to extracted metrics
+ * Implements final validation and domain-specific adjustments
+ */
+function applyDomainPostProcessing(
+  metrics: MetricCandidate[],
+  domainProfile?: any
+): MetricCandidate[] {
+  if (!domainProfile) return metrics;
+  
+  return metrics.map(metric => {
+    // Apply domain-specific confidence adjustments
+    let adjustedConfidence = metric.confidence;
+    
+    // Boost confidence for required fields in domain
+    const isRequiredField = domainProfile.active_fields?.some(
+      (f: any) => f.field === metric.label && f.required
+    );
+    if (isRequiredField) {
+      adjustedConfidence = Math.min(1.0, adjustedConfidence + 0.1);
+    }
+    
+    // Apply domain-specific unit normalization
+    let normalizedUnit = metric.unit;
+    if (domainProfile.unit_targets && domainProfile.unit_targets[metric.label]) {
+      normalizedUnit = domainProfile.unit_targets[metric.label];
+    }
+    
+    // Apply canonicalizations
+    let normalizedValue = metric.value;
+    if (domainProfile.canonicalizations && domainProfile.canonicalizations[metric.label]) {
+      const canonMap = domainProfile.canonicalizations[metric.label];
+      if (typeof normalizedValue === 'string' && canonMap[normalizedValue]) {
+        normalizedValue = canonMap[normalizedValue];
+        adjustedConfidence = Math.min(1.0, adjustedConfidence + 0.05);
+      }
+    }
+    
+    return {
+      ...metric,
+      value: normalizedValue,
+      unit: normalizedUnit,
+      confidence: adjustedConfidence
+    };
+  });
+}
 
 /**
  * Parse a raw value string into typed value + unit

@@ -939,7 +939,7 @@ export const processExtractionJob = action({
           }
           continue;
         }
-        const synonymEntry = synonymMap?.entries?.find(e => e.canonicalMetricId === mapping.metricId);
+        const synonymEntry = synonymMap?.entries?.find((e: any) => e.canonicalMetricId === mapping.metricId);
         const valueWithUnit = candidate.unit ? `${candidate.value} ${candidate.unit}` : String(candidate.value);
         const norm = normalizeValueUnit(valueWithUnit, synonymEntry?.unitRules);
         metrics.push({

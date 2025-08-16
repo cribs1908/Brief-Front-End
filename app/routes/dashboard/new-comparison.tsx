@@ -5,7 +5,7 @@ import { Button } from "~/components/ui/button";
 import { Separator } from "~/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Input } from "~/components/ui/input";
-import { useComparison, isMinBetter, compareCells, isRedFlagRow, isSignificantRow } from "~/state/comparison";
+import { useComparison, isMinBetter, compareCells, isRedFlagRow, isSignificantRow } from "~/state/comparison-supabase";
 import { Checkbox } from "~/components/ui/checkbox";
 import { Label } from "~/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "~/components/ui/tooltip";
@@ -102,7 +102,7 @@ export default function NewComparisonPage() {
 
   const canStart = useMemo(() => {
     return state.files.length >= 2 && 
-           state.files.every(f => f.storageId && !f.uploading);
+           state.files.every(f => f.documentId && !f.uploading);
   }, [state.files]);
   const startSimulated = useCallback(() => {
     void startProcessing();
@@ -150,7 +150,7 @@ export default function NewComparisonPage() {
                           </TableCell>
                           <TableCell className="text-sm">{(f.size / 1024).toFixed(1)} KB</TableCell>
                           <TableCell className="text-xs text-muted-foreground">
-                            {f.uploading ? "caricando..." : f.storageId ? "caricato" : "errore"}
+                            {f.uploading ? "caricando..." : f.uploaded ? "caricato" : f.error ? "errore" : "in attesa"}
                           </TableCell>
                           <TableCell>
                             <Dialog open={deleteOpen === f.id} onOpenChange={(o) => setDeleteOpen(o ? f.id : null)}>
