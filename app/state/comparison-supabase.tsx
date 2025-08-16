@@ -1,7 +1,7 @@
 "use client";
 import React, { createContext, useCallback, useContext, useMemo, useReducer } from "react";
 import { useLocalStorage } from "~/hooks/use-local-storage";
-import { supabaseService } from "~/lib/supabase-service";
+import { apiGateway } from "~/lib/api-gateway";
 
 export type ComparisonFile = { 
   id: string; 
@@ -117,8 +117,8 @@ function toTitleCaseVendor(fileName: string): string {
     .join(" ");
 }
 
-// Convert Supabase results to frontend table format
-function buildTableFromSupabaseResults(results: any, documents: any[]): ComparisonTable {
+// Convert API Gateway results to frontend table format
+function buildTableFromAPIGatewayResults(results: any): ComparisonTable {
   if (!results || !results.columns || !results.rows) {
     return {
       columns: ["Metrica"],
@@ -130,22 +130,17 @@ function buildTableFromSupabaseResults(results: any, documents: any[]): Comparis
     };
   }
 
-  // Get document names mapping
-  const docMap = new Map(documents.map(doc => [doc.id, doc]));
-  
-  const columns = ["Metrica", ...results.rows.map((row: any) => {
-    const doc = docMap.get(row.documentId);
-    return doc ? (doc.vendor_name || doc.name.replace(/\.pdf$/i, '')) : `Document ${row.documentId}`;
+  // Build columns from document IDs
+  const columns = ["Metrica", ...results.rows.map((row: any, index: number) => {
+    return `Document ${index + 1}`;
   })];
 
   // Build vendor metadata
-  const vendorMeta = results.rows.map((row: any) => {
-    const doc = docMap.get(row.documentId);
-    const vendorName = doc ? (doc.vendor_name || doc.name.replace(/\.pdf$/i, '')) : `Document ${row.documentId}`;
+  const vendorMeta = results.rows.map((row: any, index: number) => {
     return {
-      vendor: vendorName,
-      source: doc ? doc.name : `Document ${row.documentId}`,
-      docId: row.documentId,
+      vendor: `Document ${index + 1}`,
+      source: `Document ${row.document_id}`,
+      docId: row.document_id,
       dateParsed: Date.now(),
     };
   });
@@ -205,6 +200,11 @@ function buildTableFromSupabaseResults(results: any, documents: any[]): Comparis
     filters: defaultFilters,
     pinnedKeys: []
   };
+}
+
+// Legacy function for backward compatibility  
+function buildTableFromSupabaseResults(results: any, documents: any[]): ComparisonTable {
+  return buildTableFromAPIGatewayResults(results);
 }
 
 function inferCategoryFromLabel(label: string): string {
@@ -275,42 +275,110 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     });
     dispatch({ type: "ADD_FILES", files: next });
 
-    // Upload files to Supabase in parallel
-    for (const f of list) {
-      try {
-        const id = `${f.name}-${f.size}-${f.lastModified}`;
-        console.log(`Uploading ${f.name} to Supabase...`);
+    try {
+      // Step 1: Create job and get signed upload URLs
+      console.log('🚀 Creating job with API Gateway...');
+      const jobResponse = await apiGateway.createJob({
+        fileCount: list.length,
+        domainMode: 'auto'
+      });
+      
+      dispatch({ type: "SET_JOB_ID", jobId: jobResponse.job_id });
+      console.log('✅ Job created:', jobResponse.job_id);
+
+      // Step 2: Upload files using signed URLs
+      const uploadedFiles: { originalName: string; storagePath: string; size: number }[] = [];
+      
+      for (let i = 0; i < list.length; i++) {
+        const file = list[i];
+        const uploadUrl = jobResponse.upload_urls[i];
         
-        const vendorName = toTitleCaseVendor(f.name);
-        const documentId = await supabaseService.uploadDocument(f, vendorName);
-        
-        // Update file with success
-        dispatch({ 
-          type: "ADD_FILES", 
-          files: [{ 
-            id, 
-            name: f.name, 
-            size: f.size, 
-            vendorName,
-            documentId, 
-            uploading: false,
-            uploaded: true
-          }] 
+        if (!uploadUrl) {
+          throw new Error(`No upload URL for file ${file.name}`);
+        }
+
+        try {
+          const id = `${file.name}-${file.size}-${file.lastModified}`;
+          console.log(`📤 Uploading ${file.name} via signed URL...`);
+          
+          // Upload to signed URL
+          const uploadResponse = await fetch(uploadUrl.url, {
+            method: 'PUT',
+            body: file,
+            headers: {
+              'Content-Type': 'application/pdf'
+            }
+          });
+
+          if (!uploadResponse.ok) {
+            throw new Error(`Upload failed: ${uploadResponse.statusText}`);
+          }
+
+          // Track successful upload
+          uploadedFiles.push({
+            originalName: file.name,
+            storagePath: uploadUrl.path,
+            size: file.size
+          });
+
+          const vendorName = toTitleCaseVendor(file.name);
+          
+          // Update file with success
+          dispatch({ 
+            type: "ADD_FILES", 
+            files: [{ 
+              id, 
+              name: file.name, 
+              size: file.size, 
+              vendorName,
+              documentId: jobResponse.job_id, // Use job ID temporarily 
+              uploading: false,
+              uploaded: true
+            }] 
+          });
+          
+          console.log(`✅ ${file.name} uploaded successfully`);
+          
+        } catch (error) {
+          console.error(`❌ Failed to upload ${file.name}:`, error);
+          const id = `${file.name}-${file.size}-${file.lastModified}`;
+          dispatch({ 
+            type: "ADD_FILES", 
+            files: [{ 
+              id, 
+              name: file.name, 
+              size: file.size, 
+              uploading: false,
+              error: error instanceof Error ? error.message : 'Upload failed'
+            }] 
+          });
+        }
+      }
+
+      // Step 3: Complete upload and start processing
+      if (uploadedFiles.length > 0) {
+        console.log('📋 Completing upload for', uploadedFiles.length, 'files...');
+        await apiGateway.completeUpload({
+          jobId: jobResponse.job_id,
+          files: uploadedFiles
         });
-        
-        console.log(`✓ ${f.name} uploaded successfully`);
-        
-      } catch (error) {
-        console.error(`Failed to upload ${f.name}:`, error);
-        const id = `${f.name}-${f.size}-${f.lastModified}`;
+        console.log('✅ Upload completed, processing will start automatically');
+      }
+
+    } catch (error) {
+      console.error('❌ Failed to create job or upload files:', error);
+      
+      // Mark all files as failed
+      for (const file of list) {
+        const id = `${file.name}-${file.size}-${file.lastModified}`;
         dispatch({ 
           type: "ADD_FILES", 
           files: [{ 
             id, 
-            name: f.name, 
-            size: f.size, 
+            name: file.name, 
+            size: file.size, 
             uploading: false,
-            error: error instanceof Error ? error.message : 'Upload failed'
+            error: error instanceof Error ? error.message : 'Job creation failed'
           }] 
         });
       }
@@ -319,26 +387,15 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
 
   const removeFile = useCallback(async (id: string) => {
     const file = state.files.find(f => f.id === id);
-    if (file?.documentId) {
-      try {
-        await supabaseService.deleteDocument(file.documentId);
-      } catch (error) {
-        console.error('Failed to delete document:', error);
-      }
-    }
+    // Note: With API Gateway, file deletion is handled automatically when job is deleted
+    // For now, just remove from UI state
     dispatch({ type: "REMOVE_FILE", id });
   }, [state.files]);
 
   const renameVendor = useCallback(async (fileId: string, vendorName: string) => {
     const file = state.files.find(f => f.id === fileId);
-    if (file?.documentId) {
-      try {
-        await supabaseService.updateDocument(file.documentId, { vendor_name: vendorName });
-      } catch (error) {
-        console.error('Failed to update vendor name:', error);
-      }
-    }
-    
+    // Note: Vendor name changes will be handled during processing
+    // For now, just update UI state
     const nextFiles = state.files.map((f) => (f.id === fileId ? { ...f, vendorName } : f));
     dispatch({ type: "ADD_FILES", files: nextFiles });
   }, [state.files]);
@@ -346,11 +403,17 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
   const startProcessing = useCallback(async () => {
     if (state.files.length < 2) return;
     
-    console.log("=== STARTING SUPABASE PROCESSING ===");
-    console.log("Files to process:", state.files.map(f => ({ name: f.name, documentId: f.documentId })));
+    if (!state.currentJobId) {
+      alert('No job ID available. Please upload files first.');
+      return;
+    }
+    
+    console.log("=== STARTING API GATEWAY PROCESSING ===");
+    console.log("Job ID:", state.currentJobId);
+    console.log("Files to process:", state.files.map(f => ({ name: f.name, uploaded: f.uploaded })));
     
     // Check if all files have been uploaded
-    const unuploadedFiles = state.files.filter(f => !f.documentId || f.uploading || f.error);
+    const unuploadedFiles = state.files.filter(f => !f.uploaded || f.uploading || f.error);
     if (unuploadedFiles.length > 0) {
       const errorFiles = unuploadedFiles.filter(f => f.error);
       const uploadingFiles = unuploadedFiles.filter(f => f.uploading);
@@ -370,39 +433,57 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     try {
       dispatch({ type: "SET_PROCESSING", processing: { step: 1, running: true } });
       
-      // Step 1: Create comparison job
-      const documentIds = state.files
-        .map(f => f.documentId)
-        .filter((id): id is string => !!id);
+      // Monitor job status until completion
+      console.log("📊 Monitoring job status...");
       
-      console.log("Creating comparison job with documents:", documentIds);
-      const jobId = await supabaseService.createComparisonJob("New Comparison", documentIds);
-      dispatch({ type: "SET_JOB_ID", jobId });
+      let attempts = 0;
+      const maxAttempts = 60; // 2 minutes with 2s intervals
       
-      // Step 2: Process the job
-      dispatch({ type: "SET_PROCESSING", processing: { step: 2, running: true } });
-      
-      console.log("Processing comparison job:", jobId);
-      await supabaseService.processComparisonJob(jobId);
-      
-      // Step 3: Get results
-      dispatch({ type: "SET_PROCESSING", processing: { step: 3, running: true } });
-      
-      const jobData = await supabaseService.getComparisonJobWithDocuments(jobId);
-      if (!jobData?.job.results) {
-        throw new Error("No results generated");
+      while (attempts < maxAttempts) {
+        dispatch({ type: "SET_PROCESSING", processing: { step: 2, running: true } });
+        
+        const statusResponse = await apiGateway.getJobStatus(state.currentJobId);
+        console.log(`Status check ${attempts + 1}:`, statusResponse.status, `(${statusResponse.progress}%)`);
+        
+        if (statusResponse.status === 'READY') {
+          // Job completed successfully
+          dispatch({ type: "SET_PROCESSING", processing: { step: 3, running: true } });
+          
+          console.log("🎉 Processing completed! Getting results...");
+          const results = await apiGateway.getJobResults(state.currentJobId);
+          
+          if (!results || !results.columns || !results.rows) {
+            throw new Error("No results generated");
+          }
+          
+          // Convert API Gateway results to table format
+          const table = buildTableFromAPIGatewayResults(results);
+          
+          dispatch({ type: "SET_TABLE", table });
+          dispatch({ type: "SET_RESULTS", has: true });
+          
+          console.log("✅ Results loaded successfully");
+          break;
+          
+        } else if (statusResponse.status === 'FAILED') {
+          throw new Error(statusResponse.error || 'Job processing failed');
+          
+        } else if (statusResponse.status === 'CANCELLED') {
+          throw new Error('Job was cancelled');
+          
+        } else {
+          // Still processing, wait and retry
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          attempts++;
+        }
       }
       
-      // Convert results to table format
-      const table = buildTableFromSupabaseResults(jobData.job.results, jobData.documents);
-      
-      dispatch({ type: "SET_TABLE", table });
-      dispatch({ type: "SET_RESULTS", has: true });
-      
-      console.log("✓ Processing completed successfully");
+      if (attempts >= maxAttempts) {
+        throw new Error('Processing timeout - job did not complete within 2 minutes');
+      }
       
     } catch (error) {
-      console.error("Processing failed:", error);
+      console.error("❌ Processing failed:", error);
       
       // Create error table
       const errorTable = {
@@ -430,7 +511,7 @@ export function ComparisonProvider({ children }: { children: React.ReactNode }) 
     } finally {
       dispatch({ type: "SET_PROCESSING", processing: { step: 0, running: false } });
     }
-  }, [state.files]);
+  }, [state.files, state.currentJobId]);
 
   const regenerateTable = useCallback(() => {
     // For now, just re-run processing

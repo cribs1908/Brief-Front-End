@@ -39,6 +39,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "convex": "^1.24.3",
+    "dotenv": "^17.2.1",
     "form-data": "^4.0.4",
     "isbot": "^5.1.27",
     "langchain": "^0.3.30",
